@@ -1,0 +1,5 @@
+(library
+ (name yacewo)
+ (public_name yacewo)
+ (instrumentation
+  (backend bisect_ppx)))

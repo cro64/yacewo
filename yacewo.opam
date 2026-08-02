@@ -1,0 +1,26 @@
+opam-version: "2.0"
+synopsis: "Yet Another Chess Engine Written in OCaml"
+description: """
+YACEWO — Classical and Anarchy two-player chess with a UI-ready engine API.
+"""
+license: "MIT"
+depends: [
+  "ocaml"
+  "dune" {>= "3.4"}
+  "ANSITerminal"
+  "ounit2" {with-test}
+  "bisect_ppx" {dev}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+  ]
+]
