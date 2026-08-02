@@ -43,6 +43,15 @@ let instruction extend =
     print_endline "     i. You can only undo on your turn.";
     print_endline "     ii. You can undo multiple times.");
   print_string "Enter ";
+  ANSITerminal.print_string [ ANSITerminal.yellow ] "Fen";
+  print_endline " to show the current position in FEN.";
+  if extend then
+    print_endline
+      "     i. Enter \"Fen <fen>\" to load a position from FEN (optional 7th field = Anarchy seed).";
+  print_string "Enter ";
+  ANSITerminal.print_string [ ANSITerminal.yellow ] "Moves";
+  print_endline " to show the move list.";
+  print_string "Enter ";
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Help";
   print_endline " to get help."
 
@@ -57,6 +66,30 @@ let print_status_message = function
   | Rules.Check _ -> print_endline "\n You are in check!"
   | Rules.InProgress -> ()
 
+let starts_with prefix s =
+  let n = String.length prefix in
+  String.length s >= n && String.sub s 0 n = prefix
+
+let print_game_summary game =
+  let moves = move_list game in
+  if moves <> "" then print_endline (" Moves: " ^ moves);
+  (match seed game with
+  | Some s -> print_endline (" Seed: " ^ string_of_int s)
+  | None -> ());
+  print_endline (" FEN: " ^ to_fen game)
+
+let rec ask_anarchy_seed () =
+  print_string " Enter Anarchy seed (blank for random): ";
+  flush stdout;
+  match String.trim (read_line ()) with
+  | "" -> None
+  | s -> (
+      match int_of_string_opt s with
+      | Some n when n >= 0 -> Some n
+      | _ ->
+          print_endline " Please enter a non-negative integer, or leave blank.";
+          ask_anarchy_seed ())
+
 let rec playing_game game =
   let st = status game in
   (match st with
@@ -64,6 +97,7 @@ let rec playing_game game =
   | InProgress -> ()
   | terminal ->
       print_status_message terminal;
+      print_game_summary game;
       exit 0);
   (match turn game with
   | White -> print_string "\n White to move: "
@@ -76,11 +110,13 @@ let rec playing_game game =
   | "Resign" ->
       let game = resign game in
       print_status_message (status game);
+      print_game_summary game;
       exit 0
   | "Draw" ->
       let game = offer_draw game in
       if is_over game then (
         print_status_message (status game);
+        print_game_summary game;
         exit 0)
       else playing_game game
   | "Undo" -> (
@@ -91,6 +127,29 @@ let rec playing_game game =
           playing_game game
       | Error e ->
           print_endline (" " ^ error_to_string e ^ ". Please play a valid move.");
+          playing_game game)
+  | "Moves" ->
+      let moves = move_list game in
+      if moves = "" then print_endline " No moves yet."
+      else print_endline (" " ^ moves);
+      playing_game game
+  | "Fen" ->
+      print_endline (" " ^ to_fen game);
+      playing_game game
+  | fen_cmd when starts_with "Fen " fen_cmd -> (
+      let fen = String.trim (String.sub fen_cmd 4 (String.length fen_cmd - 4)) in
+      match of_fen fen with
+      | Ok game ->
+          (match seed game with
+          | Some s ->
+              print_endline
+                (" Loaded position from FEN (Anarchy seed " ^ string_of_int s
+               ^ ").")
+          | None -> print_endline " Loaded position from FEN.");
+          print_string (print_board (board game));
+          playing_game game
+      | Error e ->
+          print_endline (" " ^ error_to_string e);
           playing_game game)
   | move_str -> (
       match apply_notation game move_str with
@@ -129,7 +188,18 @@ let main () =
     "\n\nWelcome to YACEWO — Yet Another Chess Engine Written in OCaml.\n";
   play_mode_print ();
   let mode = play_mode () in
-  let game = create mode in
+  let game =
+    match mode with
+    | `Classical -> create `Classical
+    | `Anarchy ->
+        let seed_opt = ask_anarchy_seed () in
+        create ?seed:seed_opt `Anarchy
+  in
+  (match seed game with
+  | Some s ->
+      ANSITerminal.print_string [ ANSITerminal.yellow ]
+        (Printf.sprintf "Anarchy seed: %d\n" s)
+  | None -> ());
   instruction false;
   ANSITerminal.print_string [ ANSITerminal.red ] "Have fun!";
   print_string (print_board (board game));

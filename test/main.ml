@@ -423,10 +423,62 @@ let path_tests =
       assert_bool "Nf3 pseudo" (is_pseudo_legal pos m) );
   ]
 
+(* ---------- FEN / move list ---------- *)
+
+let start_fen =
+  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+let fen_move_list_tests =
+  [
+    ( "classical to_fen" >:: fun _ ->
+      assert_equal start_fen (to_fen (create `Classical)) );
+    ( "fen round-trip start" >:: fun _ ->
+      match Fen.of_fen start_fen with
+      | Error e -> assert_failure (Fen.error_to_string e)
+      | Ok (pos, seed) ->
+          assert_equal None seed;
+          assert_equal start_fen (Fen.to_fen pos) );
+    ( "of_fen after e4" >:: fun _ ->
+      let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1" in
+      let g = must_ok (of_fen fen) in
+      assert_equal Black (turn g);
+      assert_equal
+        (Some { kind = Pawn; color = White })
+        (get (board g) (5, 4));
+      assert_equal fen (to_fen g) );
+    ( "anarchy seed stored and in fen" >:: fun _ ->
+      let g = create ~seed:42 `Anarchy in
+      assert_equal (Some 42) (seed g);
+      let fen = to_fen g in
+      assert_bool "fen ends with seed"
+        (Filename.check_suffix fen " 42"
+        ||
+        let parts = String.split_on_char ' ' fen in
+        List.nth parts (List.length parts - 1) = "42");
+      let g2 = must_ok (of_fen fen) in
+      assert_equal (Some 42) (seed g2);
+      assert_equal fen (to_fen g2);
+      (* Same seed reproduces the same starting layout. *)
+      let g3 = create ~seed:42 `Anarchy in
+      assert_equal (to_fen g) (to_fen g3) );
+    ( "move list scholars" >:: fun _ ->
+      let g = play [ "e4"; "e5"; "Bc4"; "Nc6"; "Qh5"; "Nf6" ] in
+      assert_equal "1. e4 e5  2. Bc4 Nc6  3. Qh5 Nf6" (move_list g) );
+    ( "move list after undo" >:: fun _ ->
+      let g = play [ "e4"; "e5"; "Nf3" ] in
+      let g = must_ok (undo g) in
+      assert_equal "1. e4" (move_list g) );
+    ( "bad fen rejected" >:: fun _ ->
+      match of_fen "not a fen" with
+      | Error (Fen _) -> ()
+      | _ -> assert_failure "expected Fen error" );
+  ]
+
 let tests =
   "chess test suite"
   >::: classical_setup_tests @ notation_tests @ capture_tests
        @ en_passant_tests @ castling_tests @ promotion_tests @ check_tests
        @ material_tests @ engine_meta_tests @ path_tests
+       @ fen_move_list_tests
 
 let () = run_test_tt_main tests

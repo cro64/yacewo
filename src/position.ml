@@ -38,7 +38,7 @@ let make ?(turn = White) ?(castling = all_castling) ?(en_passant = None)
 
 let classical = make (Board.of_list Setup.classical)
 
-let anarchy ?seed () = make (Board.of_list (Setup.anarchy ?seed ()))
+let anarchy ~seed = make (Board.of_list (Setup.anarchy ~seed))
 
 let of_pieces ?(turn = White) ?(castling = all_castling) ?(en_passant = None)
     pieces =

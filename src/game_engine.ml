@@ -4,12 +4,14 @@ type mode = [ `Classical | `Anarchy ]
 
 type error =
   | Notation of Notation.error
+  | Fen of Fen.error
   | Illegal_move
   | Undo_unavailable
   | Game_over
 
 let error_to_string = function
   | Notation e -> Notation.error_to_string e
+  | Fen e -> Fen.error_to_string e
   | Illegal_move -> "illegal move"
   | Undo_unavailable -> "cannot undo"
   | Game_over -> "game is over"
@@ -18,25 +20,71 @@ type t = {
   position : Position.t;
   history : Position.t list;
       (** Prior positions, newest first (after each completed ply). *)
+  plies : string list;
+      (** Algebraic plies in chronological order (oldest first). *)
+  seed : int option;
+      (** Anarchy RNG seed when applicable. *)
   white_draw : bool;
   black_draw : bool;
   terminal : Rules.status option;
       (** Set on resign / draw agreement; otherwise derived. *)
 }
 
+let fresh_seed () =
+  Random.self_init ();
+  Random.bits ()
+
 let create ?seed mode =
-  let position =
-    match mode with
-    | `Classical -> Position.classical
-    | `Anarchy -> Position.anarchy ?seed ()
+  match mode with
+  | `Classical ->
+      {
+        position = Position.classical;
+        history = [];
+        plies = [];
+        seed = None;
+        white_draw = false;
+        black_draw = false;
+        terminal = None;
+      }
+  | `Anarchy ->
+      let seed = match seed with Some s -> s | None -> fresh_seed () in
+      {
+        position = Position.anarchy ~seed;
+        history = [];
+        plies = [];
+        seed = Some seed;
+        white_draw = false;
+        black_draw = false;
+        terminal = None;
+      }
+
+let of_fen fen =
+  match Fen.of_fen fen with
+  | Error e -> Error (Fen e)
+  | Ok (position, seed) ->
+      Ok
+        {
+          position;
+          history = [];
+          plies = [];
+          seed;
+          white_draw = false;
+          black_draw = false;
+          terminal = None;
+        }
+
+let to_fen g = Fen.to_fen ?seed:g.seed g.position
+
+let seed g = g.seed
+
+let move_list g =
+  let rec pairs i = function
+    | [] -> []
+    | w :: b :: rest ->
+        Printf.sprintf "%d. %s %s" i w b :: pairs (i + 1) rest
+    | [ w ] -> [ Printf.sprintf "%d. %s" i w ]
   in
-  {
-    position;
-    history = [];
-    white_draw = false;
-    black_draw = false;
-    terminal = None;
-  }
+  String.concat "  " (pairs 1 g.plies)
 
 let position g = g.position
 let board g = g.position.board
@@ -66,12 +114,14 @@ let apply_move g move =
   if is_over g then Error Game_over
   else if not (Moves.is_legal g.position move) then Error Illegal_move
   else
+    let san = Notation.of_move g.position move in
     let g = clear_opponent_draw g in
     let next = Moves.apply_unchecked g.position move in
     let g =
       {
         g with
         history = g.position :: g.history;
+        plies = g.plies @ [ san ];
         position = next;
         terminal = None;
       }
@@ -94,10 +144,17 @@ let undo g =
      same side is to move again (matches original CLI undo). *)
   match g.history with
   | _opponent :: prev :: rest ->
+      let plies =
+        match List.rev g.plies with
+        | _ :: _ :: rev -> List.rev rev
+        | _ -> []
+      in
       Ok
         {
           position = prev;
           history = rest;
+          plies;
+          seed = g.seed;
           white_draw = false;
           black_draw = false;
           terminal = None;

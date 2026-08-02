@@ -190,3 +190,89 @@ let parse pos input =
         if Moves.is_legal pos (Moves.Castle `Queen) then Ok (Moves.Castle `Queen)
         else Error Illegal
     | _ -> parse_normal pos input
+
+let kind_letter = function
+  | Pawn -> ""
+  | Knight -> "N"
+  | Bishop -> "B"
+  | Rook -> "R"
+  | Queen -> "Q"
+  | King -> "K"
+
+let promo_letter = function
+  | Queen -> "Q"
+  | Rook -> "R"
+  | Bishop -> "B"
+  | Knight -> "N"
+  | Pawn | King -> ""
+
+(** Minimal disambiguation among other legal moves of the same piece kind. *)
+let disambiguation pos kind from to_ =
+  let others =
+    Moves.legal_moves pos
+    |> List.filter_map (function
+         | Moves.Normal { from = f; to_ = t; _ } when t = to_ && f <> from -> (
+             match Board.get pos.Position.board f with
+             | Some p when p.kind = kind && p.color = pos.turn -> Some f
+             | _ -> None)
+         | _ -> None)
+  in
+  match others with
+  | [] -> ""
+  | _ ->
+      let fx, fy = from in
+      let same_file = List.exists (fun (f, _) -> f = fx) others in
+      let same_rank = List.exists (fun (_, r) -> r = fy) others in
+      if not same_file then String.make 1 (Char.chr (Char.code 'a' + fx - 1))
+      else if not same_rank then string_of_int fy
+      else string_of_square from
+
+let is_capture pos move =
+  match move with
+  | Moves.Castle _ -> false
+  | Moves.Normal { from; to_; _ } -> (
+      match Board.get pos.Position.board to_ with
+      | Some _ -> true
+      | None -> (
+          match Board.get pos.board from with
+          | Some { kind = Pawn; _ } ->
+              Some to_ = pos.en_passant
+          | _ -> false))
+
+let of_move pos move =
+  let body =
+    match move with
+    | Moves.Castle `King -> "O-O"
+    | Moves.Castle `Queen -> "O-O-O"
+    | Moves.Normal { from; to_; promotion } -> (
+        match Board.get pos.Position.board from with
+        | None -> string_of_square to_
+        | Some p ->
+            let capture = is_capture pos move in
+            let dest = string_of_square to_ in
+            let promo =
+              match promotion with
+              | None -> ""
+              | Some k -> "=" ^ promo_letter k
+            in
+            (match p.kind with
+            | Pawn ->
+                let prefix =
+                  if capture then
+                    String.make 1
+                      (Char.chr (Char.code 'a' + fst from - 1))
+                    ^ "x"
+                  else ""
+                in
+                prefix ^ dest ^ promo
+            | kind ->
+                let x = if capture then "x" else "" in
+                kind_letter kind
+                ^ disambiguation pos kind from to_
+                ^ x ^ dest ^ promo))
+  in
+  let next = Moves.apply_unchecked pos move in
+  let opponent = opposite pos.turn in
+  if Moves.in_check next opponent then
+    if Moves.legal_moves next = [] then body ^ "#" else body ^ "+"
+  else body

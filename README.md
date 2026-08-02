@@ -10,8 +10,8 @@
 
 Two-player chess in OCaml with a UI-ready engine API. Play Classical or
 **Anarchy** (randomized armies, kings fixed) in the terminal with Unicode pieces
-and algebraic notation — plus Undo, Resign, and Draw. Supports castling,
-promotion, en passant, checkmate, and draws.
+and algebraic notation — plus Undo, Resign, Draw, FEN import/export, and a move
+list. Supports castling, promotion, en passant, checkmate, and draws.
 
 # Installation
 

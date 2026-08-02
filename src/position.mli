@@ -37,8 +37,8 @@ val make :
 val classical : t
 (** Standard starting position, White to move. *)
 
-val anarchy : ?seed:int -> unit -> t
-(** Anarchy starting position. *)
+val anarchy : seed:int -> t
+(** Anarchy starting position for [seed]. *)
 
 val of_pieces :
   ?turn:color ->

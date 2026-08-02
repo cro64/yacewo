@@ -46,8 +46,6 @@ let anarchy_side color =
       (sq, mk kind color))
     squares
 
-let anarchy ?seed () =
-  (match seed with
-  | Some s -> Random.init s
-  | None -> Random.self_init ());
+let anarchy ~seed =
+  Random.init seed;
   anarchy_side White @ anarchy_side Black

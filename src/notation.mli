@@ -20,3 +20,7 @@ val square_of_string : string -> square option
 (** Parse a square like [e4]. *)
 
 val string_of_square : square -> string
+
+val of_move : Position.t -> Moves.move -> string
+(** Render [move] in algebraic notation for [pos] (before the move is applied),
+    including disambiguation and check / mate markers. *)
