@@ -11,6 +11,13 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --plate-pad: 0.75rem;
   --board-size: 480px;
+  /* Landing menu column — shared by mode / seed / CTA / FEN */
+  --landing-menu: 18rem;
+  --landing-gap: 1.25rem;
+  --landing-stack: 0.65rem;
+  --text-btn-size: 0.82rem;
+  --text-btn-pad: 0.25rem 0;
+  --label-size: 0.72rem;
 }
 
 html[data-theme="light"] {
@@ -35,9 +42,10 @@ html[data-theme="light"] {
   --piece-w: #f7f4ec;
   --piece-b: #1a2820;
   --piece-w-edge: #3a4f40;
-  --plate: rgb(255 255 255 / 0.32);
+  --plate: rgb(255 255 255 / 0.22);
   --plate-edge: rgb(255 255 255 / 0.65);
-  --frost-blur: 20px;
+  --frost-blur: 12px;
+  --frost-sheet: rgb(226 239 224 / 0.08);
 }
 
 html[data-theme="dark"] {
@@ -61,9 +69,10 @@ html[data-theme="dark"] {
   --piece-w: #f6f3ec;
   --piece-b: #0d1410;
   --piece-w-edge: #1c2a20;
-  --plate: rgb(24 36 28 / 0.5);
+  --plate: rgb(24 36 28 / 0.38);
   --plate-edge: rgb(180 212 182 / 0.22);
-  --frost-blur: 22px;
+  --frost-blur: 12px;
+  --frost-sheet: rgb(18 28 22 / 0.12);
 }
 
 *,
@@ -131,6 +140,8 @@ a:focus-visible {
 /* —— chrome —— */
 
 .topbar {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -153,11 +164,11 @@ a:focus-visible {
   border: none;
   background: transparent;
   color: var(--ink-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-btn-size);
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0.35rem 0;
+  padding: var(--text-btn-pad);
   border-bottom: 1px solid transparent;
 }
 
@@ -169,82 +180,409 @@ a:focus-visible {
 /* —— landing —— */
 
 .landing {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 2.5rem 1.25rem 4rem;
-  display: grid;
-  gap: 2.25rem;
+  position: relative;
+  width: 100%;
+  margin: 0;
+  /* Hero fills the viewport under the topbar — frost sizes to this, not the menu. */
+  min-height: calc(100dvh - 4.5rem);
+  padding: 1.25rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--landing-gap);
+}
+
+.landing-wash {
+  pointer-events: none;
+  /* Fixed so wash + frost share one full-viewport sheet (incl. under topbar). */
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: none;
+  overflow: hidden;
+}
+
+.landing-wash::before,
+.landing-wash::after {
+  position: absolute;
+  line-height: 1;
+  font-family: var(--font-display);
+  color: var(--moss-deep);
+  pointer-events: none;
+}
+
+.landing-wash::before {
+  content: "♜";
+  /* Flank the centered 42rem menu, not the viewport edges. */
+  left: calc(50% - min(21rem, 42vw) - 1rem);
+  top: 26%;
+  font-size: clamp(8rem, 28vw, 14rem);
+  opacity: 0.38;
+  transform: translateX(-55%) rotate(-18deg);
+}
+
+.landing-wash::after {
+  content: "♞";
+  left: calc(50% + min(21rem, 42vw) + 1rem);
+  right: auto;
+  top: 8%;
+  font-size: clamp(11rem, 36vw, 20rem);
+  opacity: 0.4;
+  transform: translateX(-45%) rotate(24deg);
+}
+
+/* Full-viewport frost sheet — same layer under menu and topbar. */
+.landing-frost {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: var(--frost-sheet);
+  backdrop-filter: blur(3px) saturate(1.25);
+  -webkit-backdrop-filter: blur(3px) saturate(1.25);
+}
+
+.landing > *:not(.landing-wash):not(.landing-frost) {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+/* Landing chrome sits on the frost sheet — no second backdrop-filter. */
+.landing .board-plate,
+.landing .field input,
+.landing .field textarea,
+.landing .fen-panel textarea,
+.landing .seed-ritual input {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.landing .board-plate {
+  background: var(--glass-strong);
+}
+
+.landing .fen-panel textarea,
+.landing .seed-ritual input {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.landing-hero {
+  text-align: center;
+  width: 100%;
+  max-width: 42rem;
+  padding-inline: 0.25rem;
 }
 
 .landing-hero h1 {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: clamp(4rem, 14vw, 6.5rem);
-  line-height: 0.88;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin: 0 0 0.85rem;
+  /* One line: scales with viewport so the full tagline fits */
+  font-size: clamp(0.85rem, 0.35rem + 2.4vw, 2.05rem);
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  margin: 0;
+  max-width: none;
+  width: 100%;
+  white-space: nowrap;
   color: var(--moss-deep);
 }
 
-.landing-hero p {
-  margin: 0;
-  max-width: 22rem;
-  font-size: 1.05rem;
-  color: var(--ink-muted);
-  font-weight: 400;
-}
-
-.mode-select {
+.landing-preview {
   display: grid;
-  gap: 1.1rem;
+  justify-items: center;
+  gap: var(--landing-stack);
+  width: 100%;
+  max-width: min(32rem, 100%);
+  /* Override inherited play-board size (`.board` uses --board-size). */
+  --board-size: min(480px, 88vw);
 }
 
-.mode-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.65rem;
+.landing-preview .mode-toggle {
+  max-width: var(--landing-menu);
 }
 
-.mode-btn {
-  appearance: none;
-  border: 1px solid var(--line);
-  background: var(--glass);
-  backdrop-filter: blur(var(--frost-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--frost-blur)) saturate(1.35);
-  border-radius: 2px;
-  min-height: 4.25rem;
-  padding: 0.85rem 1rem;
-  text-align: left;
-  display: grid;
-  gap: 0.2rem;
-  box-shadow: 0 1px 0 rgb(255 255 255 / 0.35) inset;
-  transition: border-color 160ms var(--ease), background 160ms var(--ease);
+.preview-plate {
+  padding: 0.4rem;
+  /* Do NOT put transform animations on frosted glass — transform
+     flattens the element and backdrop-filter stops seeing the wash. */
+  animation: plate-breathe 5.5s ease-in-out infinite;
 }
 
-.mode-btn .mode-name {
+.preview-plate.anarchy {
+  border-color: color-mix(in srgb, var(--anarchy) 45%, var(--plate-edge));
+}
+
+.board.preview-board {
+  width: var(--board-size);
+  height: var(--board-size);
+  pointer-events: auto;
+}
+
+.preview-board .sq {
+  cursor: default;
+}
+
+.preview-board .piece {
+  font-size: clamp(1.35rem, 5.5vw, 2.05rem);
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--landing-stack);
+  width: 100%;
   font-family: var(--font-display);
-  font-size: 1.45rem;
+}
+
+.mode-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: var(--text-btn-pad);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 140ms var(--ease), border-color 140ms var(--ease);
+}
+
+.mode-link:hover {
+  color: var(--ink);
+}
+
+.mode-link.active {
+  color: var(--moss-deep);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  border-bottom-color: var(--moss-deep);
+}
+
+.mode-link.active.anarchy,
+.mode-link.anarchy.active {
+  color: var(--anarchy);
+  border-bottom-color: var(--anarchy);
+}
+
+.mode-sep {
+  color: var(--ink-muted);
+  opacity: 0.55;
+  font-size: 1.25rem;
   line-height: 1;
 }
 
-.mode-btn .mode-hint {
-  font-size: 0.78rem;
+.seed-ritual {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.seed-inline {
+  font-size: var(--label-size);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--ink-muted);
+  font-weight: 500;
 }
 
-.mode-btn.active {
-  border-color: var(--moss-deep);
-  background: color-mix(in srgb, var(--moss) 22%, var(--glass-strong));
-  box-shadow: inset 3px 0 0 var(--moss-deep);
+.seed-ritual input {
+  width: 7.5ch;
+  min-width: 0;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.15rem 0.1rem;
+  font-family: var(--font-mono);
+  font-size: var(--label-size);
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
-.mode-btn[data-mode="anarchy"].active {
-  border-color: var(--anarchy);
-  box-shadow: inset 3px 0 0 var(--anarchy);
-  background: color-mix(in srgb, var(--anarchy) 14%, var(--glass-strong));
+.seed-ritual input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--anarchy);
+}
+
+.text-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: var(--text-btn-pad);
+  font-size: var(--text-btn-size);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.text-btn:hover {
+  color: var(--ink);
+  border-bottom-color: var(--moss);
+}
+
+.seed-roll {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--anarchy);
+  padding: 0.15rem;
+  line-height: 0;
+}
+
+.seed-roll-icon {
+  display: block;
+}
+
+.seed-roll:hover {
+  border-bottom-color: transparent;
+  color: var(--ink);
+}
+
+.landing-cta {
+  display: grid;
+  gap: var(--landing-stack);
+  width: 100%;
+  max-width: var(--landing-menu);
+  justify-items: stretch;
+}
+
+.landing-cta .error-line {
+  width: 100%;
+  text-align: center;
+}
+
+.landing-fen {
+  display: grid;
+  gap: var(--landing-stack);
+  width: 100%;
+  max-width: var(--landing-menu);
+  justify-items: center;
+}
+
+.landing-seed {
+  width: 100%;
+  max-width: var(--landing-menu);
+}
+
+.fen-toggle {
+  font-size: var(--label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.fen-panel {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
+  justify-items: stretch;
+}
+
+.fen-panel textarea {
+  width: 100%;
+  min-height: 2.75rem;
+  max-height: 6rem;
+  resize: vertical;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0.35rem 0.1rem;
+  font-family: var(--font-mono);
+  font-size: var(--label-size);
+  line-height: 1.35;
+  background: transparent;
+}
+
+.fen-panel textarea:focus-visible {
+  outline: none;
+  border-bottom-color: var(--moss);
+}
+
+.fen-panel .text-btn {
+  font-size: var(--label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  justify-self: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.play-btn {
+  transition:
+    transform 140ms var(--ease),
+    background 140ms var(--ease),
+    box-shadow 140ms var(--ease);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--moss-deep) 22%, transparent);
+}
+
+.play-btn:hover {
+  transform: translateY(-2px);
+}
+
+.play-btn:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--moss-deep) 18%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-plate,
+  .landing-preview.is-settling .preview-plate,
+  .landing-preview.is-settling .preview-board .piece,
+  .play-btn {
+    animation: none !important;
+  }
+}
+
+.landing-preview.is-settling .preview-board .piece {
+  animation: piece-settle 520ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 4ms);
+}
+
+.landing-preview.is-settling .preview-plate {
+  animation: none;
+}
+
+@keyframes piece-settle {
+  from {
+    transform: translateY(-8px) scale(0.94);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes plate-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.45) inset,
+      0 18px 40px color-mix(in srgb, var(--ink) 8%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.55) inset,
+      0 26px 52px color-mix(in srgb, var(--ink) 14%, transparent);
+  }
 }
 
 .field {
@@ -253,7 +591,7 @@ a:focus-visible {
 }
 
 .field label {
-  font-size: 0.72rem;
+  font-size: var(--label-size);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-muted);
@@ -287,8 +625,8 @@ a:focus-visible {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 0.85rem;
-  padding: 1rem 1.25rem;
+  font-size: var(--text-btn-size);
+  padding: 0.85rem 1.25rem;
   border-radius: 2px;
   transition: transform 140ms var(--ease), background 140ms var(--ease);
 }
@@ -311,7 +649,7 @@ html[data-theme="dark"] .primary-btn {
   background: transparent;
   border-radius: 2px;
   padding: 0.55rem 0.85rem;
-  font-size: 0.82rem;
+  font-size: var(--text-btn-size);
   font-weight: 500;
   letter-spacing: 0.02em;
   transition: border-color 140ms var(--ease), background 140ms var(--ease);
@@ -334,7 +672,7 @@ html[data-theme="dark"] .primary-btn {
   gap: 0.75rem;
   align-items: center;
   color: var(--ink-muted);
-  font-size: 0.72rem;
+  font-size: var(--label-size);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -573,6 +911,46 @@ html[data-theme="dark"] .primary-btn {
 
 .sq:active .piece {
   transform: scale(1.05);
+}
+
+.preview-board.wave-white .piece.white,
+.preview-board.wave-black .piece.black {
+  animation: piece-wave 560ms var(--ease) both;
+}
+
+.preview-board.wave-white .piece.white {
+  animation-delay: calc(var(--wave-col, 0) * 48ms);
+}
+
+.preview-board.wave-black .piece.black {
+  /* Wave from black's left (h-file → a-file). */
+  animation-delay: calc((7 - var(--wave-col, 0)) * 48ms);
+}
+
+.preview-board.wave-white .sq:hover .piece.white,
+.preview-board.wave-black .sq:hover .piece.black {
+  /* Let the wave own transform while animating. */
+  transform: none;
+}
+
+@keyframes piece-wave {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-8px);
+  }
+  55% {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-board.wave-white .piece.white,
+  .preview-board.wave-black .piece.black {
+    animation: none !important;
+  }
 }
 
 .piece.white {

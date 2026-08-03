@@ -113,6 +113,13 @@ class App {
   private helpOpen = false;
   private pendingPromo: { from: string; to: string } | null = null;
   private notation = "";
+  /** Landing hero board (non-interactive). */
+  private previewBoard: Array<Piece | null> = [];
+  /** Held Anarchy seed when the input is blank (WYSIWYG with Play). */
+  private anarchyPreviewSeed: number | null = null;
+  private previewAnim = false;
+
+  private fenOpen = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -123,12 +130,51 @@ class App {
     this.root.innerHTML = `<div class="loading"><p>Loading YACEWO engine…</p></div>`;
     try {
       this.api = await loadEngine();
+      this.refreshPreview(false);
       this.render();
     } catch (e) {
       this.root.innerHTML = `<div class="boot-error"><h1>Could not load engine</h1><p>${
         e instanceof Error ? e.message : String(e)
       }</p></div>`;
     }
+  }
+
+  private refreshPreview(animate: boolean) {
+    const result =
+      this.mode === "classical"
+        ? this.api.createClassical()
+        : (() => {
+            const trimmed = this.seedInput.trim();
+            if (trimmed !== "") {
+              const n = Number(trimmed);
+              if (!Number.isInteger(n) || n < 0) return null;
+              return this.api.createAnarchy(n);
+            }
+            if (this.anarchyPreviewSeed != null) {
+              return this.api.createAnarchy(this.anarchyPreviewSeed);
+            }
+            return this.api.createAnarchy(-1);
+          })();
+    if (!result || !result.ok || !result.game) return;
+    this.previewBoard = result.game.board;
+    if (this.mode === "anarchy" && result.game.seed != null) {
+      this.anarchyPreviewSeed = result.game.seed;
+    }
+    this.previewAnim = animate;
+  }
+
+  private rollAnarchySeed() {
+    const result = this.api.createAnarchy(-1);
+    if (!result.ok || !result.game || result.game.seed == null) {
+      this.error = result.error ?? "Could not roll seed";
+      return;
+    }
+    this.mode = "anarchy";
+    this.seedInput = String(result.game.seed);
+    this.anarchyPreviewSeed = result.game.seed;
+    this.previewBoard = result.game.board;
+    this.previewAnim = true;
+    this.error = "";
   }
 
   private setGame(game: GameSnapshot) {
@@ -248,42 +294,80 @@ class App {
     `;
   }
 
+  private renderPreviewBoard() {
+    const anim = this.previewAnim ? " is-settling" : "";
+    const plateMod = this.mode === "anarchy" ? " preview-plate anarchy" : " preview-plate";
+    const squares = this.previewBoard
+      .map((piece, i) => {
+        const { file, rank } = fileRank(i);
+        const light = (file + rank) % 2 === 1;
+        const glyph = pieceGlyph(piece);
+        const delay = this.previewAnim
+          ? ` style="--i:${i};--wave-col:${file - 1}"`
+          : ` style="--wave-col:${file - 1}"`;
+        return `<div class="sq ${light ? "light" : "dark"}${piece ? " has-piece" : ""}"${delay}>${
+          glyph ? `<span class="piece ${piece?.color ?? ""}">${glyph}</span>` : ""
+        }</div>`;
+      })
+      .join("");
+    return `
+      <div class="landing-preview${anim}">
+        <div class="board-plate${plateMod}" aria-hidden="true">
+          <div class="board preview-board">${squares}</div>
+        </div>
+        <div class="mode-toggle" role="tablist" aria-label="Game mode">
+          <button type="button" role="tab" class="mode-link${this.mode === "classical" ? " active" : ""}" data-mode="classical" aria-selected="${this.mode === "classical"}">Classical</button>
+          <span class="mode-sep" aria-hidden="true">·</span>
+          <button type="button" role="tab" class="mode-link${this.mode === "anarchy" ? " active anarchy" : ""}" data-mode="anarchy" aria-selected="${this.mode === "anarchy"}">Anarchy</button>
+        </div>
+      </div>
+    `;
+  }
+
   private renderLanding() {
+    if (this.previewBoard.length === 0) this.refreshPreview(false);
     return `
       ${this.renderTopbar(false)}
       <main class="landing">
+        <div class="landing-wash" aria-hidden="true"></div>
+        <div class="landing-frost" aria-hidden="true"></div>
         <section class="landing-hero">
-          <h1>YACEWO</h1>
-          <p>(Yet) Another Chess Engine Written in OCaml</p>
+          <h1>(Yet Another) Chess Engine Written in OCaml</h1>
         </section>
-        <section class="mode-select">
-          <div class="mode-row">
-            <button type="button" class="mode-btn ${this.mode === "classical" ? "active" : ""}" data-mode="classical">
-              <span class="mode-name">Classical</span>
-              <span class="mode-hint">Standard starting armies</span>
-            </button>
-            <button type="button" class="mode-btn ${this.mode === "anarchy" ? "active" : ""}" data-mode="anarchy">
-              <span class="mode-name">Anarchy</span>
-              <span class="mode-hint">Seeded random armies</span>
-            </button>
-          </div>
+        ${this.renderPreviewBoard()}
+        <section class="landing-cta">
+          <button type="button" class="primary-btn play-btn" data-action="start">Play</button>
+          ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
+        </section>
+        <section class="landing-fen">
+          <button type="button" class="text-btn fen-toggle" data-action="toggle-fen" aria-expanded="${this.fenOpen}">
+            ${this.fenOpen ? "Hide position" : "Load position"}
+          </button>
           ${
-            this.mode === "anarchy"
-              ? `<div class="field">
-                  <label for="seed">Seed (blank = random)</label>
-                  <input id="seed" inputmode="numeric" placeholder="42" value="${escapeAttr(this.seedInput)}" />
+            this.fenOpen
+              ? `<div class="fen-panel">
+                  <label class="sr-only" for="fen">FEN</label>
+                  <textarea id="fen" rows="2" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">${escapeHtml(this.fenInput)}</textarea>
+                  <button type="button" class="text-btn" data-action="load-fen">Load</button>
                 </div>`
               : ""
           }
-          <button type="button" class="primary-btn" data-action="start">Play</button>
-          <div class="divider"><span>or load FEN</span></div>
-          <div class="field">
-            <label for="fen">FEN</label>
-            <textarea id="fen" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">${escapeHtml(this.fenInput)}</textarea>
-            <button type="button" class="ghost-btn" data-action="load-fen">Load FEN</button>
-          </div>
-          ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
         </section>
+        ${
+          this.mode === "anarchy"
+            ? `<section class="landing-seed">
+                <div class="seed-ritual">
+                  <label class="seed-inline" for="seed">Seed</label>
+                  <input id="seed" inputmode="numeric" placeholder="random" value="${escapeAttr(this.seedInput)}" />
+                  <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
+                    <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
+                    </svg>
+                  </button>
+                </div>
+              </section>`
+            : ""
+        }
       </main>
     `;
   }
@@ -313,7 +397,7 @@ class App {
           .filter(Boolean)
           .join(" ");
         const glyph = pieceGlyph(piece);
-        return `<button type="button" class="${classes}" data-sq="${alg}" aria-label="${alg}">${
+        return `<button type="button" class="${classes}" data-sq="${alg}" aria-label="${alg}" style="--wave-col:${file - 1}">${
           glyph
             ? `<span class="piece ${piece?.color ?? ""}">${glyph}</span>`
             : ""
@@ -436,6 +520,52 @@ class App {
     this.root.innerHTML =
       this.screen === "landing" ? this.renderLanding() : this.renderPlay();
     this.bind();
+    if (this.screen === "landing" && this.previewAnim) {
+      window.setTimeout(() => {
+        this.previewAnim = false;
+        this.root.querySelector(".landing-preview")?.classList.remove("is-settling");
+      }, 700);
+    }
+  }
+
+  private patchLandingPreview() {
+    const host = this.root.querySelector(".landing-preview");
+    if (!host) return;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = this.renderPreviewBoard().trim();
+    const next = tmp.firstElementChild;
+    if (next) host.replaceWith(next);
+    if (this.previewAnim) {
+      window.setTimeout(() => {
+        this.previewAnim = false;
+        this.root.querySelector(".landing-preview")?.classList.remove("is-settling");
+      }, 700);
+    }
+  }
+
+  private bindPieceWave(board: HTMLElement) {
+    board.addEventListener("pointerover", (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const sq = t.closest(".sq");
+      if (!sq || !board.contains(sq)) return;
+      const piece = sq.querySelector(".piece");
+      if (!piece) return;
+      const color = piece.classList.contains("white")
+        ? "white"
+        : piece.classList.contains("black")
+          ? "black"
+          : null;
+      if (!color) return;
+      const cls = `wave-${color}`;
+      if (board.classList.contains(cls)) return;
+      board.classList.remove("wave-white", "wave-black");
+      void board.offsetWidth;
+      board.classList.add(cls);
+    });
+    board.addEventListener("pointerleave", () => {
+      board.classList.remove("wave-white", "wave-black");
+    });
   }
 
   private bind() {
@@ -450,13 +580,18 @@ class App {
       e.preventDefault();
       this.screen = "landing";
       this.error = "";
+      this.refreshPreview(true);
       this.render();
     });
 
     this.root.querySelectorAll("[data-mode]").forEach((el) => {
       el.addEventListener("click", () => {
-        this.mode = (el as HTMLElement).dataset.mode === "anarchy" ? "anarchy" : "classical";
+        const next =
+          (el as HTMLElement).dataset.mode === "anarchy" ? "anarchy" : "classical";
+        if (next === this.mode) return;
+        this.mode = next;
         this.error = "";
+        this.refreshPreview(true);
         this.render();
       });
     });
@@ -464,6 +599,26 @@ class App {
     const seed = this.root.querySelector<HTMLInputElement>("#seed");
     seed?.addEventListener("input", () => {
       this.seedInput = seed.value;
+      const trimmed = this.seedInput.trim();
+      if (trimmed === "") {
+        // Keep held preview seed; don't reshuffle while typing blank.
+        return;
+      }
+      const n = Number(trimmed);
+      if (!Number.isInteger(n) || n < 0) return;
+      this.anarchyPreviewSeed = n;
+      this.refreshPreview(true);
+      this.patchLandingPreview();
+    });
+
+    this.root.querySelector("[data-action='roll-seed']")?.addEventListener("click", () => {
+      this.rollAnarchySeed();
+      this.render();
+    });
+
+    this.root.querySelector("[data-action='toggle-fen']")?.addEventListener("click", () => {
+      this.fenOpen = !this.fenOpen;
+      this.render();
     });
 
     const fen = this.root.querySelector<HTMLTextAreaElement>("#fen");
@@ -477,9 +632,9 @@ class App {
         this.tryResult(this.api.createClassical());
       } else {
         const trimmed = this.seedInput.trim();
-        // jsoo methods need an argument; -1 means "pick a random seed" in the bridge.
         if (trimmed === "") {
-          this.tryResult(this.api.createAnarchy(-1));
+          const seed = this.anarchyPreviewSeed ?? -1;
+          this.tryResult(this.api.createAnarchy(seed));
         } else {
           const n = Number(trimmed);
           if (!Number.isInteger(n) || n < 0) {
@@ -503,6 +658,9 @@ class App {
         if (alg) this.onSquareClick(alg);
       });
     });
+
+    const preview = this.root.querySelector<HTMLElement>(".preview-board");
+    if (preview) this.bindPieceWave(preview);
 
     const form = this.root.querySelector<HTMLFormElement>("[data-form='notation']");
     form?.addEventListener("submit", (e) => {
@@ -537,6 +695,7 @@ class App {
       this.screen = "landing";
       this.error = "";
       this.helpOpen = false;
+      this.refreshPreview(true);
       this.render();
     });
     this.root.querySelector("[data-action='copy-fen']")?.addEventListener("click", async () => {
