@@ -1,6 +1,8 @@
 open Piece
 
-type mode = [ `Classical | `Anarchy ]
+type queer_variant = [ `TwoKings | `TwoQueens ]
+
+type mode = [ `Classical | `Anarchy | `Chess960 | `Queer of queer_variant ]
 
 type error =
   | Notation of Notation.error
@@ -23,7 +25,7 @@ type t = {
   plies : string list;
       (** Algebraic plies in chronological order (oldest first). *)
   seed : int option;
-      (** Anarchy RNG seed when applicable. *)
+      (** Layout RNG seed when applicable (Anarchy / Chess960). *)
   white_draw : bool;
   black_draw : bool;
   terminal : Rules.status option;
@@ -34,29 +36,28 @@ let fresh_seed () =
   Random.self_init ();
   Random.bits ()
 
+let empty_meta seed position =
+  {
+    position;
+    history = [];
+    plies = [];
+    seed;
+    white_draw = false;
+    black_draw = false;
+    terminal = None;
+  }
+
 let create ?seed mode =
   match mode with
-  | `Classical ->
-      {
-        position = Position.classical;
-        history = [];
-        plies = [];
-        seed = None;
-        white_draw = false;
-        black_draw = false;
-        terminal = None;
-      }
+  | `Classical -> empty_meta None Position.classical
   | `Anarchy ->
       let seed = match seed with Some s -> s | None -> fresh_seed () in
-      {
-        position = Position.anarchy ~seed;
-        history = [];
-        plies = [];
-        seed = Some seed;
-        white_draw = false;
-        black_draw = false;
-        terminal = None;
-      }
+      empty_meta (Some seed) (Position.anarchy ~seed)
+  | `Chess960 ->
+      let seed = match seed with Some s -> s | None -> fresh_seed () in
+      empty_meta (Some seed) (Position.chess960 ~seed)
+  | `Queer `TwoKings -> empty_meta None Position.queer_kings
+  | `Queer `TwoQueens -> empty_meta None Position.queer_queens
 
 let of_fen fen =
   match Fen.of_fen fen with

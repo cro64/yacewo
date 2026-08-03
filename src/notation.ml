@@ -36,7 +36,7 @@ let parse_promotion rest =
   match String.split_on_char '=' rest with
   | [ _; p ] when String.length p = 1 -> (
       match char_to_kind p.[0] with
-      | Some (Queen | Rook | Bishop | Knight as k) -> Some k
+      | Some (Queen | Rook | Bishop | Knight | King as k) -> Some k
       | _ -> None)
   | [ _ ] -> None
   | _ -> None
@@ -183,12 +183,24 @@ let parse pos input =
   if input = "" then Error Empty
   else
     match input with
-    | "O-O" | "0-0" ->
-        if Moves.is_legal pos (Moves.Castle `King) then Ok (Moves.Castle `King)
-        else Error Illegal
-    | "O-O-O" | "0-0-0" ->
-        if Moves.is_legal pos (Moves.Castle `Queen) then Ok (Moves.Castle `Queen)
-        else Error Illegal
+    | "O-O" | "0-0" -> (
+        match
+          Moves.legal_moves pos
+          |> List.find_opt (function
+               | Moves.Castle { side = `King; _ } -> true
+               | _ -> false)
+        with
+        | Some m -> Ok m
+        | None -> Error Illegal)
+    | "O-O-O" | "0-0-0" -> (
+        match
+          Moves.legal_moves pos
+          |> List.find_opt (function
+               | Moves.Castle { side = `Queen; _ } -> true
+               | _ -> false)
+        with
+        | Some m -> Ok m
+        | None -> Error Illegal)
     | _ -> parse_normal pos input
 
 let kind_letter = function
@@ -204,7 +216,8 @@ let promo_letter = function
   | Rook -> "R"
   | Bishop -> "B"
   | Knight -> "N"
-  | Pawn | King -> ""
+  | King -> "K"
+  | Pawn -> ""
 
 (** Minimal disambiguation among other legal moves of the same piece kind. *)
 let disambiguation pos kind from to_ =
@@ -242,8 +255,8 @@ let is_capture pos move =
 let of_move pos move =
   let body =
     match move with
-    | Moves.Castle `King -> "O-O"
-    | Moves.Castle `Queen -> "O-O-O"
+    | Moves.Castle { side = `King; _ } -> "O-O"
+    | Moves.Castle { side = `Queen; _ } -> "O-O-O"
     | Moves.Normal { from; to_; promotion } -> (
         match Board.get pos.Position.board from with
         | None -> string_of_square to_

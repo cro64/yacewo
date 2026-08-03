@@ -1,7 +1,8 @@
 (** Forsyth–Edwards Notation (FEN) encode / decode.
 
-    Standard six fields, with an optional seventh Anarchy seed field:
-    [placement turn castling ep halfmove fullmove [seed]] *)
+    Standard six fields, with an optional seventh field that is either a layout
+    seed (Anarchy / Chess960) or a Queer tag ([dk] / [dq]):
+    [placement turn castling ep halfmove fullmove [seed|dk|dq]] *)
 
 open Piece
 
@@ -70,6 +71,15 @@ let castling_to_fen (c : Position.castling_rights) =
   in
   if s = "" then "-" else s
 
+let variant_tag (pos : Position.t) =
+  match pos.rules.castling with
+  | Flexible -> (
+      match pos.rules.critical with
+      | Queen -> Some "dq"
+      | King -> Some "dk"
+      | _ -> None)
+  | Standard | Disabled -> None
+
 let to_fen ?seed (pos : Position.t) =
   let turn = match pos.turn with White -> "w" | Black -> "b" in
   let ep =
@@ -82,8 +92,11 @@ let to_fen ?seed (pos : Position.t) =
       (castling_to_fen pos.castling) ep pos.halfmove pos.fullmove
   in
   match seed with
-  | None -> base
   | Some s -> Printf.sprintf "%s %d" base s
+  | None -> (
+      match variant_tag pos with
+      | Some tag -> Printf.sprintf "%s %s" base tag
+      | None -> base)
 
 let parse_placement s =
   let ranks = String.split_on_char '/' s in
@@ -145,7 +158,10 @@ let parse_int field name =
   | Some n when n >= 0 -> Ok n
   | _ -> Error (Malformed ("bad " ^ name))
 
-let parse_position_fields placement turn_s castle_s ep_s half_s full_s =
+let immobile_from_board board =
+  Board.all_pieces board |> List.map fst
+
+let parse_position_fields ?rules placement turn_s castle_s ep_s half_s full_s =
   match parse_placement placement with
   | Error _ as e -> e
   | Ok pieces -> (
@@ -181,9 +197,20 @@ let parse_position_fields placement turn_s castle_s ep_s half_s full_s =
                           if fullmove < 1 then
                             Error (Invalid "fullmove must be >= 1")
                           else
+                            let board = Board.of_list pieces in
+                            let rules =
+                              match rules with
+                              | Some r -> r
+                              | None -> Position.rules_classical
+                            in
+                            let immobile =
+                              match rules.castling with
+                              | Flexible -> immobile_from_board board
+                              | Standard | Disabled -> []
+                            in
                             Ok
                               (Position.make ~turn ~castling ~en_passant
-                                 ~halfmove ~fullmove (Board.of_list pieces)))))))
+                                 ~halfmove ~fullmove ~rules ~immobile board))))))
 
 let of_fen input =
   let fields =
@@ -197,13 +224,28 @@ let of_fen input =
       with
       | Error _ as e -> e
       | Ok pos -> Ok (pos, None))
-  | [ placement; turn_s; castle_s; ep_s; half_s; full_s; seed_s ] -> (
-      match
-        parse_position_fields placement turn_s castle_s ep_s half_s full_s
-      with
-      | Error _ as e -> e
-      | Ok pos -> (
-          match parse_int seed_s "seed" with
+  | [ placement; turn_s; castle_s; ep_s; half_s; full_s; extra ] -> (
+      let queer_rules =
+        match String.lowercase_ascii extra with
+        | "dk" -> Some Position.rules_double_kings
+        | "dq" -> Some Position.rules_double_queens
+        | _ -> None
+      in
+      match queer_rules with
+      | Some rules -> (
+          match
+            parse_position_fields ~rules placement turn_s castle_s ep_s half_s
+              full_s
+          with
           | Error _ as e -> e
-          | Ok seed -> Ok (pos, Some seed)))
+          | Ok pos -> Ok (pos, None))
+      | None -> (
+          match
+            parse_position_fields placement turn_s castle_s ep_s half_s full_s
+          with
+          | Error _ as e -> e
+          | Ok pos -> (
+              match parse_int extra "seed" with
+              | Error _ as e -> e
+              | Ok seed -> Ok (pos, Some seed))))
   | _ -> Error (Malformed "expected 6 or 7 FEN fields")

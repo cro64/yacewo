@@ -12,16 +12,17 @@ type status =
 let piece_color_square = function
   | (x, y), _ -> (x + y) mod 2
 
-let insufficient_material board =
-  let non_kings =
-    Board.all_pieces board
-    |> List.filter (fun (_, p) -> p.kind <> King)
+let insufficient_material (pos : Position.t) =
+  let critical = pos.rules.critical in
+  let non_critical =
+    Board.all_pieces pos.board
+    |> List.filter (fun (_, p) -> p.kind <> critical)
   in
   let white =
-    List.filter (fun (_, p) -> p.color = White) non_kings
+    List.filter (fun (_, p) -> p.color = White) non_critical
   in
   let black =
-    List.filter (fun (_, p) -> p.color = Black) non_kings
+    List.filter (fun (_, p) -> p.color = Black) non_critical
   in
   let only_minor = function
     | [] -> true
@@ -35,7 +36,7 @@ let insufficient_material board =
   | _ -> only_minor white && only_minor black
 
 let status_of pos =
-  if insufficient_material pos.Position.board then DrawInsufficient
+  if insufficient_material pos then DrawInsufficient
   else
     let legal = Moves.legal_moves pos in
     let check = Moves.in_check pos pos.turn in

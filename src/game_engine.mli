@@ -2,7 +2,9 @@
 
 open Piece
 
-type mode = [ `Classical | `Anarchy ]
+type queer_variant = [ `TwoKings | `TwoQueens ]
+
+type mode = [ `Classical | `Anarchy | `Chess960 | `Queer of queer_variant ]
 
 type error =
   | Notation of Notation.error
@@ -17,18 +19,19 @@ type t
 (** Opaque game state including history and draw offers. *)
 
 val create : ?seed:int -> mode -> t
-(** New game. For Anarchy, [seed] selects the layout; if omitted a random seed
-    is chosen and stored. Classical ignores [seed]. *)
+(** New game. For Anarchy and Chess960, [seed] selects the layout; if omitted a
+    random seed is chosen and stored. Classical and Queer ignore [seed]. *)
 
 val seed : t -> int option
-(** Anarchy seed when this game has one. *)
+(** Layout seed when this game has one (Anarchy / Chess960). *)
 
 val of_fen : string -> (t, error) result
 (** Start a game from a FEN string (empty move list). Optional seventh FEN
-    field restores the Anarchy seed. *)
+    field restores a layout seed or Queer tag ([dk]/[dq]). *)
 
 val to_fen : t -> string
-(** Current position as FEN; includes seed as a seventh field when present. *)
+(** Current position as FEN; includes seed or Queer tag as a seventh field when
+    present. *)
 
 val move_list : t -> string
 (** Played moves in numbered algebraic form, e.g. [1. e4 e5 2. Nf3]. *)

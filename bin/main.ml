@@ -45,9 +45,11 @@ let instruction extend =
   print_string "Enter ";
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Fen";
   print_endline " to show the current position in FEN.";
-  if extend then
+  if extend then (
     print_endline
-      "     i. Enter \"Fen <fen>\" to load a position from FEN (optional 7th field = Anarchy seed).";
+      "     i. Enter \"Fen <fen>\" to load a position from FEN.";
+    print_endline
+      "        Optional 7th field: Anarchy/Chess960 seed, or Queer tag dk / dq.");
   print_string "Enter ";
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Moves";
   print_endline " to show the move list.";
@@ -55,7 +57,12 @@ let instruction extend =
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Help";
   print_endline " to get help."
 
-let print_status_message = function
+let critical_name = function
+  | King -> "king"
+  | Queen -> "queen"
+  | _ -> "royal"
+
+let print_status_message game = function
   | Rules.Checkmate White -> print_endline "\n Black wins by checkmate"
   | Rules.Checkmate Black -> print_endline "\n White wins by checkmate"
   | Rules.Stalemate -> print_endline "\n Draw by stalemate"
@@ -63,8 +70,42 @@ let print_status_message = function
   | Rules.DrawAgreement -> print_endline "\n The game has ended in a mutual draw"
   | Rules.Resigned White -> print_endline " Black wins"
   | Rules.Resigned Black -> print_endline " White wins"
-  | Rules.Check _ -> print_endline "\n You are in check!"
+  | Rules.Check _ ->
+      let royal = critical_name (position game).rules.critical in
+      print_endline
+        (Printf.sprintf
+           "\n You are in check! (every %s must be safe at end of turn)" royal)
   | Rules.InProgress -> ()
+
+let mode_label = function
+  | `Classical -> "Classical Chess"
+  | `Anarchy -> "Anarchy Chess"
+  | `Chess960 -> "Chess960"
+  | `Queer `TwoKings -> "Queer Chess — Double Kings"
+  | `Queer `TwoQueens -> "Queer Chess — Double Queens"
+
+let print_mode_banner mode game =
+  ANSITerminal.print_string [ ANSITerminal.yellow ]
+    (Printf.sprintf "Mode: %s\n" (mode_label mode));
+  (match seed game with
+  | Some s ->
+      ANSITerminal.print_string [ ANSITerminal.yellow ]
+        (Printf.sprintf "Seed: %d\n" s)
+  | None -> ());
+  match mode with
+  | `Queer `TwoKings ->
+      print_endline
+        " Both kings are royal — save every king each turn. Pawns may promote \
+         to king."
+  | `Queer `TwoQueens ->
+      print_endline
+        " Both queens are royal — save every queen each turn. Pawns may promote \
+         to queen or king (kings are ordinary)."
+  | `Chess960 ->
+      print_endline " Back rank shuffled (FIDE constraints). Castling disabled for now."
+  | `Anarchy ->
+      print_endline " Seeded random armies; kings fixed on e1/e8."
+  | `Classical -> ()
 
 let starts_with prefix s =
   let n = String.length prefix in
@@ -78,8 +119,8 @@ let print_game_summary game =
   | None -> ());
   print_endline (" FEN: " ^ to_fen game)
 
-let rec ask_anarchy_seed () =
-  print_string " Enter Anarchy seed (blank for random): ";
+let rec ask_seed label =
+  print_string (Printf.sprintf " Enter %s seed (blank for random): " label);
   flush stdout;
   match String.trim (read_line ()) with
   | "" -> None
@@ -88,15 +129,26 @@ let rec ask_anarchy_seed () =
       | Some n when n >= 0 -> Some n
       | _ ->
           print_endline " Please enter a non-negative integer, or leave blank.";
-          ask_anarchy_seed ())
+          ask_seed label)
+
+let fen_load_note game =
+  match seed game with
+  | Some s -> Printf.sprintf "Loaded position from FEN (seed %d)." s
+  | None -> (
+      match (position game).rules with
+      | { castling = Flexible; critical = King; _ } ->
+          "Loaded Double Kings position from FEN (dk)."
+      | { castling = Flexible; critical = Queen; _ } ->
+          "Loaded Double Queens position from FEN (dq)."
+      | _ -> "Loaded position from FEN.")
 
 let rec playing_game game =
   let st = status game in
   (match st with
-  | Check _ -> print_status_message st
+  | Check _ -> print_status_message game st
   | InProgress -> ()
   | terminal ->
-      print_status_message terminal;
+      print_status_message game terminal;
       print_game_summary game;
       exit 0);
   (match turn game with
@@ -109,13 +161,13 @@ let rec playing_game game =
       playing_game game
   | "Resign" ->
       let game = resign game in
-      print_status_message (status game);
+      print_status_message game (status game);
       print_game_summary game;
       exit 0
   | "Draw" ->
       let game = offer_draw game in
       if is_over game then (
-        print_status_message (status game);
+        print_status_message game (status game);
         print_game_summary game;
         exit 0)
       else playing_game game
@@ -140,12 +192,7 @@ let rec playing_game game =
       let fen = String.trim (String.sub fen_cmd 4 (String.length fen_cmd - 4)) in
       match of_fen fen with
       | Ok game ->
-          (match seed game with
-          | Some s ->
-              print_endline
-                (" Loaded position from FEN (Anarchy seed " ^ string_of_int s
-               ^ ").")
-          | None -> print_endline " Loaded position from FEN.");
+          print_endline (" " ^ fen_load_note game);
           print_string (print_board (board game));
           playing_game game
       | Error e ->
@@ -169,12 +216,18 @@ let rec playing_game game =
 let play_mode_print () =
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Choose a play mode.\n";
   print_endline " 1. Classical Chess";
-  print_endline " 2. Anarchy Chess \n"
+  print_endline " 2. Anarchy Chess";
+  print_endline " 3. Chess960";
+  print_endline " 4. Queer Chess — Double Kings";
+  print_endline " 5. Queer Chess — Double Queens \n"
 
 let mode_of_input input =
   match String.lowercase_ascii (String.trim input) with
   | "1" | "classical chess" -> `Classical
   | "2" | "anarchy chess" -> `Anarchy
+  | "3" | "chess960" -> `Chess960
+  | "4" | "queer chess" | "queer" | "double kings" | "dk" -> `Queer `TwoKings
+  | "5" | "double queens" | "dq" -> `Queer `TwoQueens
   | _ -> raise PlayModeSelectionError
 
 let rec play_mode () =
@@ -191,17 +244,19 @@ let main () =
   let game =
     match mode with
     | `Classical -> create `Classical
-    | `Anarchy ->
-        let seed_opt = ask_anarchy_seed () in
-        create ?seed:seed_opt `Anarchy
+    | `Queer _ as m -> create m
+    | (`Anarchy | `Chess960) as m ->
+        let label =
+          match m with
+          | `Anarchy -> "Anarchy"
+          | `Chess960 -> "Chess960"
+          | _ -> assert false
+        in
+        create ?seed:(ask_seed label) m
   in
-  (match seed game with
-  | Some s ->
-      ANSITerminal.print_string [ ANSITerminal.yellow ]
-        (Printf.sprintf "Anarchy seed: %d\n" s)
-  | None -> ());
+  print_mode_banner mode game;
   instruction false;
-  ANSITerminal.print_string [ ANSITerminal.red ] "Have fun!";
+  ANSITerminal.print_string [ ANSITerminal.red ] "Have fun!\n";
   print_string (print_board (board game));
   playing_game game
 

@@ -13,8 +13,8 @@ type status =
   | Resigned of color
       (** Side that resigned. *)
 
-val insufficient_material : Board.t -> bool
-(** True when neither side can force checkmate. *)
+val insufficient_material : Position.t -> bool
+(** True when neither side can force checkmate (non-critical material only). *)
 
 val status_of : Position.t -> status
 (** Derive status from the position (ignores resign / draw agreement). *)

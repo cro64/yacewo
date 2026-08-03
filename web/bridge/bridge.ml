@@ -59,19 +59,19 @@ let status_to_js (st : Rules.status) =
   end
 
 let move_to_js = function
-  | Moves.Castle `King ->
+  | Moves.Castle { side = `King; from } ->
       object%js
         val kind = Js.string "castle"
         val side = Js.string "king"
-        val from_ = Js.string ""
+        val from_ = Js.string (square_to_alg from)
         val to_ = Js.string ""
         val promotion = Js.null
       end
-  | Moves.Castle `Queen ->
+  | Moves.Castle { side = `Queen; from } ->
       object%js
         val kind = Js.string "castle"
         val side = Js.string "queen"
-        val from_ = Js.string ""
+        val from_ = Js.string (square_to_alg from)
         val to_ = Js.string ""
         val promotion = Js.null
       end
@@ -142,13 +142,24 @@ let apply_engine_result = function
 
 let create_classical () = result_ok (Game_engine.create `Classical)
 
-let create_anarchy (seed_js : int Js.optdef) =
+let create_seeded mode (seed_js : int Js.optdef) =
   let seed =
     Js.Optdef.case seed_js
       (fun () -> None)
       (fun n -> if n < 0 then None else Some n)
   in
-  result_ok (Game_engine.create ?seed `Anarchy)
+  result_ok (Game_engine.create ?seed mode)
+
+let create_anarchy seed_js = create_seeded `Anarchy seed_js
+let create_chess960 seed_js = create_seeded `Chess960 seed_js
+
+let create_queer (variant_js : Js.js_string Js.t) =
+  let mode =
+    match String.lowercase_ascii (Js.to_string variant_js) with
+    | "queens" | "dq" | "twoqueens" | "two-queens" -> `Queer `TwoQueens
+    | _ -> `Queer `TwoKings
+  in
+  result_ok (Game_engine.create mode)
 
 let of_fen fen_js =
   apply_engine_result (Game_engine.of_fen (Js.to_string fen_js))
@@ -178,12 +189,19 @@ let apply_move from_js to_js promo_js =
 
 let apply_castle side_js =
   let g = require_game () in
-  let side =
+  let want =
     match Js.to_string side_js with
     | "queen" -> `Queen
     | _ -> `King
   in
-  apply_engine_result (Game_engine.apply_move g (Moves.Castle side))
+  match
+    Game_engine.legal_moves g
+    |> List.find_opt (function
+         | Moves.Castle { side; _ } -> side = want
+         | _ -> false)
+  with
+  | Some m -> apply_engine_result (Game_engine.apply_move g m)
+  | None -> result_err "illegal move"
 
 let undo () =
   let g = require_game () in
@@ -207,6 +225,8 @@ let () =
     (object%js
        method createClassical = create_classical ()
        method createAnarchy seed = create_anarchy seed
+       method createChess960 seed = create_chess960 seed
+       method createQueer variant = create_queer variant
        method ofFen fen = of_fen fen
        method applyNotation n = apply_notation n
        method applyMove f t p = apply_move f t p

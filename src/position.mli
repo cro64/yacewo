@@ -1,4 +1,4 @@
-(** Full chess position: board, turn, castling, en passant. *)
+(** Full chess position: board, clocks, and a shared ruleset. *)
 
 open Piece
 
@@ -9,6 +9,18 @@ type castling_rights = {
   black_queen : bool;
 }
 
+type castle_style =
+  | Standard
+  | Flexible
+  | Disabled
+
+type ruleset = {
+  critical : piece_kind;
+      (** Kind that must stay safe; check/mate use every piece of this kind. *)
+  castling : castle_style;
+  promo_kinds : piece_kind list;
+}
+
 type t = {
   board : Board.t;
   turn : color;
@@ -16,6 +28,8 @@ type t = {
   en_passant : square option;
   halfmove : int;
   fullmove : int;
+  rules : ruleset;
+  immobile : square list;
 }
 
 val all_castling : castling_rights
@@ -24,12 +38,32 @@ val all_castling : castling_rights
 val no_castling : castling_rights
 (** No castling rights. *)
 
+val default_promo : piece_kind list
+val queer_promo : piece_kind list
+
+val rules_classical : ruleset
+(** Critical king, standard e-file castling, normal promotions. *)
+
+val rules_anarchy : ruleset
+(** Same ruleset as classical (layout differs, not royalty). *)
+
+val rules_chess960 : ruleset
+(** Critical king, castling disabled for now. *)
+
+val rules_double_kings : ruleset
+(** Critical kings, flexible castling, king-capable promotion. *)
+
+val rules_double_queens : ruleset
+(** Critical queens, flexible castling, king-capable promotion. *)
+
 val make :
   ?turn:color ->
   ?castling:castling_rights ->
   ?en_passant:square option ->
   ?halfmove:int ->
   ?fullmove:int ->
+  ?rules:ruleset ->
+  ?immobile:square list ->
   Board.t ->
   t
 (** Build a position from a board and optional fields. *)
@@ -40,10 +74,21 @@ val classical : t
 val anarchy : seed:int -> t
 (** Anarchy starting position for [seed]. *)
 
+val chess960 : seed:int -> t
+(** Chess960 starting position for [seed]. *)
+
+val queer_kings : t
+(** Double Kings: RNBKKBNR, both kings are critical. *)
+
+val queer_queens : t
+(** Double Queens: RNBQQBNR, both queens are critical (no kings). *)
+
 val of_pieces :
   ?turn:color ->
   ?castling:castling_rights ->
   ?en_passant:square option ->
+  ?rules:ruleset ->
+  ?immobile:square list ->
   (square * piece) list ->
   t
 (** Position from an explicit piece list (tests / custom setups). *)
