@@ -151,6 +151,11 @@ function syncRoomInUrl(room: string | null) {
 type SeededMode = "anarchy" | "chess960";
 type GameMode = "classical" | SeededMode;
 
+/** Match OCaml [Setup.chess960_id]: any int → [0, 959]. */
+function normalizeChess960Id(n: number): number {
+  return ((n % 960) + 960) % 960;
+}
+
 function isChess960Id(n: number): boolean {
   return Number.isInteger(n) && n >= 0 && n <= 959;
 }
@@ -203,7 +208,10 @@ function seedFromUrl(): number | null {
   const raw = new URLSearchParams(location.search).get("seed");
   if (raw == null || raw.trim() === "") return null;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) return null;
+  if (!Number.isInteger(n)) return null;
+  // Chess960: accept any int (engine/UI normalize via mod). Anarchy: non-negative.
+  if (seededModeFromUrl() === "chess960") return n;
+  if (n < 0) return null;
   return n;
 }
 
@@ -751,20 +759,16 @@ class App {
 
   private applySeedFromLink(seed: number) {
     const mode = seededModeFromUrl();
-    if (mode === "chess960" && !isChess960Id(seed)) {
-      this.error = "Chess960 ID must be an integer from 0 to 959";
-      this.mode = "chess960";
-      this.seedOpen = true;
-      return;
-    }
+    // Weird Chess960 URL values wrap like the engine; UI then shows the canonical ID.
+    const id = mode === "chess960" ? normalizeChess960Id(seed) : seed;
     this.mode = mode;
-    this.seedInput = String(seed);
-    this.previewSeed = seed;
+    this.seedInput = String(id);
+    this.previewSeed = id;
     this.seedOpen = true;
     this.fenOpen = false;
     this.error = "";
     this.refreshPreview(false);
-    syncSeedInUrl(seed, mode);
+    syncSeedInUrl(id, mode);
   }
 
   private refreshPreview(animate: boolean) {
@@ -1028,7 +1032,7 @@ class App {
           ${
             this.seedOpen
               ? `<div class="seed-ritual${this.mode === "chess960" ? " chess960" : ""}">
-                  <input id="seed" inputmode="numeric" placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
+                  <input id="seed" inputmode="numeric" ${this.mode === "chess960" ? 'min="0" max="959" maxlength="3" ' : ""}placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
                   <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
                     <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                       <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
@@ -1316,7 +1320,7 @@ class App {
                     <li>Last move and Coords can be toggled above the game actions (off by default).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed or Chess960 ID as a 7th field.</li>
-                    <li>Anarchy seeds share as <code>?seed=…</code>; Chess960 FIDE IDs (0–959, SP-518 = classical) as <code>?mode=chess960&amp;seed=…</code>.</li>
+                    <li>Anarchy seeds share as <code>?seed=…</code>; Chess960 FIDE IDs (0–959, SP-518 = classical) as <code>?mode=chess960&amp;seed=…</code>. Out-of-range Chess960 URL values wrap modulo 960.</li>
                     <li>Chess960 castling ends on the classical c/g (king) and d/f (rook) squares.</li>
                     <li>Remote: Set FEN or Seed/ID first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
                   </ul>
@@ -1443,13 +1447,35 @@ class App {
       const trimmed = this.seedInput.trim();
       if (trimmed === "") {
         // Keep held preview seed; don't reshuffle while typing blank.
+        this.error = "";
+        const err = this.root.querySelector(".landing-cta .error-line");
+        if (err) err.textContent = "";
         return;
       }
       const seeded: SeededMode =
         this.mode === "chess960" ? "chess960" : "anarchy";
       const parsed = parseSeededInput(trimmed, seeded);
-      if (!parsed.ok) return;
+      if (!parsed.ok) {
+        // Strict 0–959 in the control; do not preview or write URL.
+        if (seeded === "chess960") {
+          this.error = parsed.error;
+          let err = this.root.querySelector(".landing-cta .error-line");
+          if (!err) {
+            const cta = this.root.querySelector(".landing-cta");
+            if (cta) {
+              err = document.createElement("div");
+              err.className = "error-line";
+              cta.appendChild(err);
+            }
+          }
+          if (err) err.textContent = parsed.error;
+        }
+        return;
+      }
       this.previewSeed = parsed.seed;
+      this.error = "";
+      const err = this.root.querySelector(".landing-cta .error-line");
+      if (err) err.textContent = "";
       if (!isSeededMode(this.mode)) this.mode = seeded;
       syncSeedInUrl(parsed.seed, seeded);
       this.refreshPreview(true);

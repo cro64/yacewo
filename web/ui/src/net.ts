@@ -364,11 +364,10 @@ function parseSetup(raw: unknown): GameSetup | null {
   if (s.kind === "anarchy" && typeof s.seed === "number" && s.seed >= 0) {
     return { kind: "anarchy", seed: s.seed };
   }
-  if (s.kind === "chess960" && typeof s.seed === "number") {
-    const id = s.seed;
-    if (Number.isInteger(id) && id >= 0 && id <= 959) {
-      return { kind: "chess960", seed: id };
-    }
+  if (s.kind === "chess960" && typeof s.seed === "number" && Number.isInteger(s.seed)) {
+    // Wrap like the engine so a weird handshake value still lands in 0–959.
+    const id = ((s.seed % 960) + 960) % 960;
+    return { kind: "chess960", seed: id };
   }
   if (s.kind === "fen" && typeof s.fen === "string" && s.fen.trim()) {
     return { kind: "fen", fen: s.fen.trim() };

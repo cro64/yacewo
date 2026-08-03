@@ -57,7 +57,8 @@ Pick or roll a seed; the army layout is reproducible and shown in the panel
 
 Uses the FIDE / Scharnagl numbering (**0–959**). SP-518 is the classical
 starting array. Castling follows Chess960 (king ends on c/g, rook on d/f).
-Open `/yacewo/?mode=chess960&seed=518` for the familiar layout.
+Open `/yacewo/?mode=chess960&seed=518` for the familiar layout. Out-of-range
+URL values wrap modulo 960; the ID field itself only accepts 0–959.
 
 ### Remote rooms
 
