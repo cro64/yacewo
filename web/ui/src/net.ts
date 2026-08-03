@@ -13,7 +13,7 @@ export type NetMsg =
   | { type: "ready" }
   | { type: "sync"; fen: string; seed: number | null; moveList: string }
   | { type: "move"; from: string; to: string; promo: string | null }
-  | { type: "castle"; side: string }
+  | { type: "castle"; side: string; from?: string }
   | { type: "notation"; n: string }
   | { type: "undo" }
   | { type: "resign" }
@@ -339,7 +339,11 @@ function parseMsg(raw: unknown): NetMsg | null {
       };
     case "castle":
       if (typeof msg.side !== "string") return null;
-      return { type: "castle", side: msg.side };
+      return {
+        type: "castle",
+        side: msg.side,
+        ...(typeof msg.from === "string" ? { from: msg.from } : {}),
+      };
     case "notation":
       if (typeof msg.n !== "string") return null;
       return { type: "notation", n: msg.n };

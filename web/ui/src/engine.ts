@@ -22,6 +22,8 @@ export interface LegalMove {
   side: string;
   from: string;
   to: string;
+  /** Rook square for castling (empty for normal moves). */
+  rook: string;
   promotion: PieceKind | null;
 }
 
@@ -58,7 +60,7 @@ export interface YacewoApi {
     to: string,
     promo: string | null,
   ) => EngineResult;
-  applyCastle: (side: string) => EngineResult;
+  applyCastle: (side: string, from: string) => EngineResult;
   undo: () => EngineResult;
   resign: () => EngineResult;
   offerDraw: () => EngineResult;

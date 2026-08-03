@@ -184,6 +184,8 @@ let parse pos input =
   else
     match input with
     | "O-O" | "0-0" -> (
+        (* Prefer e-file origin, else lowest file — legal_moves / castle_specs
+           already sort that way; take first g-side castle. *)
         match
           Moves.legal_moves pos
           |> List.find_opt (function

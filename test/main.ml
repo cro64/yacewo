@@ -105,7 +105,8 @@ let classical_setup_tests =
       let g = create ~seed:7 `Chess960 in
       let fen = to_fen g in
       let parts = String.split_on_char ' ' fen in
-      assert_equal "-" (List.nth parts 2) );
+      assert_equal "-" (List.nth parts 2);
+      assert_bool "960 tag" (List.mem "960" parts) );
     ( "chess960 seed stable" >:: fun _ ->
       let a = to_fen (create ~seed:99 `Chess960) in
       let b = to_fen (create ~seed:99 `Chess960) in
@@ -188,6 +189,43 @@ let classical_setup_tests =
       assert_equal
         (Some { kind = Rook; color = White })
         (get next.board (3, 1)) );
+    ( "queer kings e-file O-O" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_double_kings
+          ~immobile:[ (4, 1); (1, 1); (5, 1); (8, 1) ]
+          [
+            ((4, 1), piece King White);
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((8, 1), piece Rook White);
+            ((4, 8), piece King Black);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `King; from = (5, 1) } in
+      assert_bool "e-king O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (7, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (6, 1)) );
+    ( "queer sibling blocks e-king O-O-O" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_double_kings
+          ~immobile:[ (4, 1); (1, 1); (5, 1); (8, 1) ]
+          [
+            ((4, 1), piece King White);
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((8, 1), piece Rook White);
+            ((4, 8), piece King Black);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "blocked by d-king"
+        (not (is_legal pos (Castle { side = `Queen; from = (5, 1) }))) );
     ( "queer fen round-trip" >:: fun _ ->
       let g = create (`Queer `TwoQueens) in
       let fen = to_fen g in
@@ -329,6 +367,40 @@ let castling_tests =
       assert_equal
         (Some { kind = Rook; color = White })
         (get next.board (4, 1)) );
+    ( "black O-O" >:: fun _ ->
+      let pos =
+        pos_of ~turn:Black
+          [
+            ((5, 8), piece King Black);
+            ((8, 8), piece Rook Black);
+            ((5, 1), piece King White);
+          ]
+      in
+      let next = apply_unchecked pos (Castle { side = `King; from = (5, 8) }) in
+      assert_equal
+        (Some { kind = King; color = Black })
+        (get next.board (7, 8));
+      assert_equal
+        (Some { kind = Rook; color = Black })
+        (get next.board (6, 8)) );
+    ( "black O-O-O" >:: fun _ ->
+      let pos =
+        pos_of ~turn:Black
+          [
+            ((5, 8), piece King Black);
+            ((1, 8), piece Rook Black);
+            ((5, 1), piece King White);
+          ]
+      in
+      let next =
+        apply_unchecked pos (Castle { side = `Queen; from = (5, 8) })
+      in
+      assert_equal
+        (Some { kind = King; color = Black })
+        (get next.board (3, 8));
+      assert_equal
+        (Some { kind = Rook; color = Black })
+        (get next.board (4, 8)) );
     ( "cannot castle through check" >:: fun _ ->
       let pos =
         pos_of
@@ -340,6 +412,55 @@ let castling_tests =
           ]
       in
       assert_bool "O-O illegal" (not (is_legal pos (Castle { side = `King; from = (5, 1) }))) );
+    ( "cannot castle into check" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((7, 8), piece Rook Black);
+            ((4, 8), piece King Black);
+          ]
+      in
+      assert_bool "g1 attacked"
+        (not (is_legal pos (Castle { side = `King; from = (5, 1) }))) );
+    ( "cannot castle with piece between" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((6, 1), piece Knight White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "blocked"
+        (not (is_legal pos (Castle { side = `King; from = (5, 1) })));
+      let queenside =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((2, 1), piece Bishop White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "O-O-O blocked"
+        (not
+           (is_legal queenside (Castle { side = `Queen; from = (5, 1) }))) );
+    ( "O-O-O legal when b1 attacked" >:: fun _ ->
+      (* Rook may pass through check; king path is e/d/c only. *)
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((2, 8), piece Rook Black);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "b1 fire ok"
+        (is_legal pos (Castle { side = `Queen; from = (5, 1) })) );
     ( "cannot castle after king move" >:: fun _ ->
       let pos =
         pos_of
@@ -357,6 +478,66 @@ let castling_tests =
           ]
       in
       assert_bool "no castle" (not (is_legal pos (Castle { side = `King; from = (5, 1) }))) );
+    ( "a-rook move clears only queenside" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let after =
+        apply_unchecked pos
+          (Normal { from = (1, 1); to_ = (1, 2); promotion = None })
+      in
+      let white_again = { after with turn = White } in
+      assert_bool "no O-O-O"
+        (not
+           (is_legal white_again (Castle { side = `Queen; from = (5, 1) })));
+      assert_bool "O-O still ok"
+        (is_legal white_again (Castle { side = `King; from = (5, 1) })) );
+    ( "capture on h8 clears black kingside" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((8, 7), piece Queen White);
+            ((5, 8), piece King Black);
+            ((8, 8), piece Rook Black);
+            ((1, 8), piece Rook Black);
+          ]
+      in
+      assert_bool "black started with both rights" pos.castling.black_king;
+      let next =
+        apply_unchecked pos
+          (Normal { from = (8, 7); to_ = (8, 8); promotion = None })
+      in
+      assert_bool "black O-O gone" (not next.castling.black_king);
+      assert_bool "black O-O-O kept" next.castling.black_queen );
+    ( "after O-O both white rights gone" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let next =
+        apply_unchecked pos (Castle { side = `King; from = (5, 1) })
+      in
+      let white_again = { next with turn = White } in
+      assert_bool "no O-O again"
+        (not
+           (is_legal white_again (Castle { side = `King; from = (7, 1) })));
+      assert_bool "no O-O-O either"
+        (not
+           (is_legal white_again (Castle { side = `Queen; from = (7, 1) })));
+      assert_bool "flags cleared"
+        ((not next.castling.white_king) && not next.castling.white_queen) );
     ( "cannot castle in check" >:: fun _ ->
       let pos =
         pos_of
@@ -379,6 +560,315 @@ let castling_tests =
           ]
       in
       assert_equal (Ok (Castle { side = `King; from = (5, 1) })) (parse pos "O-O") );
+    ( "notation O-O-O" >:: fun _ ->
+      let pos =
+        pos_of
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_equal
+        (Ok (Castle { side = `Queen; from = (5, 1) }))
+        (parse pos "O-O-O") );
+    ( "960 rook-only O-O when king on g" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (7, 1); (8, 1) ]
+          [
+            ((7, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `King; from = (7, 1) } in
+      assert_bool "rook-only O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (7, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (6, 1));
+      assert_equal 3 (List.length (all_pieces next.board)) );
+    ( "960 transposition O-O king on f rook on h" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (6, 1); (8, 1) ]
+          [
+            ((6, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `King; from = (6, 1) } in
+      assert_bool "transposition O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (7, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (6, 1));
+      assert_equal None (get next.board (8, 1));
+      assert_equal 3 (List.length (all_pieces next.board)) );
+    ( "960 O-O with piece on e not on path" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (6, 1); (8, 1) ]
+          [
+            ((6, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 1), piece Knight White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "e1 occupied ok"
+        (is_legal pos (Castle { side = `King; from = (6, 1) })) );
+    ( "960 O-O illegal when f attacked" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (8, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((6, 8), piece Rook Black);
+            ((4, 8), piece King Black);
+          ]
+      in
+      assert_bool "through check"
+        (not (is_legal pos (Castle { side = `King; from = (5, 1) }))) );
+    ( "960 rights cleared after rook move" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (8, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let after_rook =
+        apply_unchecked pos
+          (Normal { from = (8, 1); to_ = (8, 2); promotion = None })
+      in
+      (* Black dummy move not needed — check white rights after white rook moved. *)
+      let white_again = { after_rook with turn = White } in
+      assert_bool "no castle after rook moved"
+        (not
+           (is_legal white_again (Castle { side = `King; from = (5, 1) }))) );
+    ( "960 capture enemy rook clears their immobile" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling ~turn:White
+          ~immobile:[ (5, 1); (8, 1); (5, 8); (8, 8) ]
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+            ((8, 8), piece Rook Black);
+            ((8, 7), piece Queen White);
+          ]
+      in
+      let next =
+        apply_unchecked pos
+          (Normal { from = (8, 7); to_ = (8, 8); promotion = None })
+      in
+      assert_bool "black h-rook immobile cleared"
+        (not (List.mem (8, 8) next.immobile));
+      let black_pos = { next with turn = Black } in
+      assert_bool "black cannot O-O"
+        (not (is_legal black_pos (Castle { side = `King; from = (5, 8) }))) );
+    ( "960 a-side O-O-O ends on c/d" >:: fun _ ->
+      (* Kb1 + Ra1 (+ spare Re1): a-side castle → king c, rook d. *)
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (2, 1); (1, 1); (5, 1) ]
+          [
+            ((2, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((5, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `Queen; from = (2, 1) } in
+      assert_bool "a-side O-O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (3, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (4, 1));
+      assert_equal None (get next.board (1, 1));
+      assert_equal None (get next.board (2, 1)) );
+    ( "960 king-only O-O when rook already on f" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (6, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((6, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `King; from = (5, 1) } in
+      assert_bool "king-only O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (7, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (6, 1));
+      assert_equal None (get next.board (5, 1));
+      assert_equal 3 (List.length (all_pieces next.board)) );
+    ( "960 king-only O-O-O when rook already on d" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (4, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((4, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Castle { side = `Queen; from = (5, 1) } in
+      assert_bool "king-only O-O-O" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal
+        (Some { kind = King; color = White })
+        (get next.board (3, 1));
+      assert_equal
+        (Some { kind = Rook; color = White })
+        (get next.board (4, 1));
+      assert_equal None (get next.board (5, 1)) );
+    ( "960 may castle only once per game" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (1, 1); (8, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((1, 1), piece Rook White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let next =
+        apply_unchecked pos (Castle { side = `King; from = (5, 1) })
+      in
+      let white_again = { next with turn = White } in
+      assert_bool "no second O-O"
+        (not
+           (is_legal white_again (Castle { side = `King; from = (7, 1) })));
+      assert_bool "no O-O-O after O-O"
+        (not
+           (is_legal white_again (Castle { side = `Queen; from = (7, 1) }))) );
+    ( "960 rook-only still counts as the one castle" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (7, 1); (8, 1); (1, 1) ]
+          [
+            ((7, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((1, 1), piece Rook White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let next =
+        apply_unchecked pos (Castle { side = `King; from = (7, 1) })
+      in
+      let white_again = { next with turn = White } in
+      assert_bool "no a-side after rook-only h-side"
+        (not
+           (is_legal white_again (Castle { side = `Queen; from = (7, 1) }))) );
+    ( "960 rook may pass through attack" >:: fun _ ->
+      (* Rh8 attacks h1 (rook origin); king path e/f/g is safe. *)
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (8, 1) ]
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((8, 8), piece Rook Black);
+            ((4, 8), piece King Black);
+          ]
+      in
+      assert_bool "rook through fire ok"
+        (is_legal pos (Castle { side = `King; from = (5, 1) })) );
+    ( "960 illegal when final square attacked (king already on g)" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (7, 1); (8, 1) ]
+          [
+            ((7, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((7, 8), piece Rook Black);
+            ((5, 8), piece King Black);
+          ]
+      in
+      assert_bool "in check on g" (in_check pos White);
+      assert_bool "rook-only O-O still illegal"
+        (not (is_legal pos (Castle { side = `King; from = (7, 1) }))) );
+    ( "960 fen round-trip keeps castling" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_chess960 ~castling:no_castling
+          ~immobile:[ (5, 1); (8, 1); (5, 8); (8, 8) ]
+          [
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((5, 8), piece King Black);
+            ((8, 8), piece Rook Black);
+          ]
+      in
+      assert_bool "can O-O"
+        (is_legal pos (Castle { side = `King; from = (5, 1) }));
+      let fen = Fen.to_fen pos in
+      assert_bool "960 tag" (Filename.check_suffix fen " 960");
+      match Fen.of_fen fen with
+      | Error e -> assert_failure (Fen.error_to_string e)
+      | Ok (pos2, _) ->
+          assert_equal Chess960 pos2.rules.castling;
+          assert_bool "reload can O-O"
+            (is_legal pos2 (Castle { side = `King; from = (5, 1) })) );
+    ( "queer castling rejected while sibling checked" >:: fun _ ->
+      (* Dual-critical: e-king O-O is geometrically fine, but d-king is already
+         attacked so castling out of check is illegal. *)
+      let pos =
+        pos_of ~rules:rules_double_kings
+          ~immobile:[ (4, 1); (5, 1); (8, 1) ]
+          [
+            ((4, 1), piece King White);
+            ((5, 1), piece King White);
+            ((8, 1), piece Rook White);
+            ((4, 8), piece Rook Black);
+            ((8, 8), piece King Black);
+            ((7, 8), piece King Black);
+          ]
+      in
+      assert_bool "d-king already checked" (in_check pos White);
+      assert_bool "cannot castle while sibling checked"
+        (not (is_legal pos (Castle { side = `King; from = (5, 1) }))) );
+    ( "queer move rejected if sibling left in check" >:: fun _ ->
+      (* Black rook on the e-file; white bishop on e2 blocks check to the e-king.
+         Moving that bishop discovers check — illegal even though the d-king is fine. *)
+      let pos =
+        pos_of ~rules:rules_double_kings ~immobile:[]
+          [
+            ((4, 1), piece King White);
+            ((5, 1), piece King White);
+            ((5, 2), piece Bishop White);
+            ((5, 8), piece Rook Black);
+            ((1, 8), piece King Black);
+            ((2, 8), piece King Black);
+          ]
+      in
+      let uncover =
+        Normal { from = (5, 2); to_ = (6, 3); promotion = None }
+      in
+      assert_bool "not currently in check" (not (in_check pos White));
+      assert_bool "discover check on e-king"
+        (not (is_legal pos uncover)) );
   ]
 
 (* ---------- promotion ---------- *)

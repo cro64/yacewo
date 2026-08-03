@@ -102,7 +102,8 @@ let print_mode_banner mode game =
         " Both queens are royal — save every queen each turn. Pawns may promote \
          to queen or king (kings are ordinary)."
   | `Chess960 ->
-      print_endline " Back rank shuffled (FIDE constraints). Castling disabled for now."
+      print_endline
+        " Back rank shuffled (FIDE constraints). Castling ends on c/g and d/f."
   | `Anarchy ->
       print_endline " Seeded random armies; kings fixed on e1/e8."
   | `Classical -> ()

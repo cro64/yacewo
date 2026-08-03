@@ -1,8 +1,13 @@
 (** Forsyth–Edwards Notation (FEN) encode / decode.
 
-    Standard six fields, with an optional seventh field that is either a layout
-    seed (Anarchy / Chess960) or a Queer tag ([dk] / [dq]):
-    [placement turn castling ep halfmove fullmove [seed|dk|dq]] *)
+    Standard six fields, plus optional trailing fields:
+    - layout seed (Anarchy / Chess960)
+    - variant tags [dk] / [dq] / [960]
+    Formats: six fields; six + seed|tag; six + tag + seed.
+
+    Chess960 does not use Shredder/X-FEN. Castling field is typically [-];
+    [immobile] is rebuilt on load from back-rank kings and rooks, which may
+    over-grant rights for midgame FENs. *)
 
 open Piece
 
@@ -78,6 +83,7 @@ let variant_tag (pos : Position.t) =
       | Queen -> Some "dq"
       | King -> Some "dk"
       | _ -> None)
+  | Chess960 -> Some "960"
   | Standard | Disabled -> None
 
 let to_fen ?seed (pos : Position.t) =
@@ -91,12 +97,11 @@ let to_fen ?seed (pos : Position.t) =
     Printf.sprintf "%s %s %s %s %d %d" (placement_of_board pos.board) turn
       (castling_to_fen pos.castling) ep pos.halfmove pos.fullmove
   in
-  match seed with
-  | Some s -> Printf.sprintf "%s %d" base s
-  | None -> (
-      match variant_tag pos with
-      | Some tag -> Printf.sprintf "%s %s" base tag
-      | None -> base)
+  match (variant_tag pos, seed) with
+  | Some tag, Some s -> Printf.sprintf "%s %s %d" base tag s
+  | Some tag, None -> Printf.sprintf "%s %s" base tag
+  | None, Some s -> Printf.sprintf "%s %d" base s
+  | None, None -> base
 
 let parse_placement s =
   let ranks = String.split_on_char '/' s in
@@ -161,6 +166,17 @@ let parse_int field name =
 let immobile_from_board board =
   Board.all_pieces board |> List.map fst
 
+(** Approximate castling rights for Chess960 FEN loads (no Shredder-FEN): mark
+    back-rank kings and rooks as unmoved. May over-grant midgame. *)
+let immobile_960 board =
+  Board.all_pieces board
+  |> List.filter_map (fun ((_, r) as sq, p) ->
+         if
+           (r = 1 || r = 8)
+           && (p.kind = King || p.kind = Rook)
+         then Some sq
+         else None)
+
 let parse_position_fields ?rules placement turn_s castle_s ep_s half_s full_s =
   match parse_placement placement with
   | Error _ as e -> e
@@ -206,11 +222,18 @@ let parse_position_fields ?rules placement turn_s castle_s ep_s half_s full_s =
                             let immobile =
                               match rules.castling with
                               | Flexible -> immobile_from_board board
+                              | Chess960 -> immobile_960 board
                               | Standard | Disabled -> []
                             in
                             Ok
                               (Position.make ~turn ~castling ~en_passant
                                  ~halfmove ~fullmove ~rules ~immobile board))))))
+
+let parse_extra_tag = function
+  | "dk" -> Some (Position.rules_double_kings, None)
+  | "dq" -> Some (Position.rules_double_queens, None)
+  | "960" -> Some (Position.rules_chess960, None)
+  | _ -> None
 
 let of_fen input =
   let fields =
@@ -225,14 +248,8 @@ let of_fen input =
       | Error _ as e -> e
       | Ok pos -> Ok (pos, None))
   | [ placement; turn_s; castle_s; ep_s; half_s; full_s; extra ] -> (
-      let queer_rules =
-        match String.lowercase_ascii extra with
-        | "dk" -> Some Position.rules_double_kings
-        | "dq" -> Some Position.rules_double_queens
-        | _ -> None
-      in
-      match queer_rules with
-      | Some rules -> (
+      match parse_extra_tag (String.lowercase_ascii extra) with
+      | Some (rules, _) -> (
           match
             parse_position_fields ~rules placement turn_s castle_s ep_s half_s
               full_s
@@ -248,4 +265,17 @@ let of_fen input =
               match parse_int extra "seed" with
               | Error _ as e -> e
               | Ok seed -> Ok (pos, Some seed))))
-  | _ -> Error (Malformed "expected 6 or 7 FEN fields")
+  | [ placement; turn_s; castle_s; ep_s; half_s; full_s; tag; seed_s ] -> (
+      match parse_extra_tag (String.lowercase_ascii tag) with
+      | Some (rules, _) -> (
+          match
+            parse_position_fields ~rules placement turn_s castle_s ep_s half_s
+              full_s
+          with
+          | Error _ as e -> e
+          | Ok pos -> (
+              match parse_int seed_s "seed" with
+              | Error _ as e -> e
+              | Ok seed -> Ok (pos, Some seed)))
+      | None -> Error (Malformed "expected 6–8 FEN fields"))
+  | _ -> Error (Malformed "expected 6–8 FEN fields")

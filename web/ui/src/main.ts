@@ -570,7 +570,10 @@ class App {
         result = this.api.applyMove(msg.from, msg.to, msg.promo);
         break;
       case "castle":
-        result = this.api.applyCastle(msg.side);
+        result = this.api.applyCastle(
+          msg.side,
+          msg.from ?? (this.game.turn === "white" ? "e1" : "e8"),
+        );
         break;
       case "notation":
         result = this.api.applyNotation(msg.n);
@@ -757,10 +760,9 @@ class App {
 
   private castlesFrom(from: string): LegalMove[] {
     if (!this.game) return [];
-    const turn = this.game.turn;
-    const kingSq = turn === "white" ? "e1" : "e8";
-    if (from !== kingSq) return [];
-    return this.game.legalMoves.filter((m) => m.kind === "castle");
+    return this.game.legalMoves.filter(
+      (m) => m.kind === "castle" && m.from === from,
+    );
   }
 
   private onSquareClick(alg: string) {
@@ -784,6 +786,12 @@ class App {
     }
 
     if (piece && piece.color === this.game.turn) {
+      const castles = this.castlesFrom(this.selected);
+      const viaRook = castles.find((c) => c.rook !== "" && c.rook === alg);
+      if (viaRook) {
+        this.attemptMove(this.selected, alg);
+        return;
+      }
       this.selected = alg;
       this.render();
       return;
@@ -796,12 +804,11 @@ class App {
     if (!this.game) return;
     const castles = this.castlesFrom(from);
     for (const c of castles) {
-      const kingRank = this.game.turn === "white" ? "1" : "8";
-      const dest = c.side === "king" ? `g${kingRank}` : `c${kingRank}`;
-      if (to === dest) {
-        this.tryLocalAction(this.api.applyCastle(c.side), {
+      if (to === c.to || (c.rook !== "" && to === c.rook)) {
+        this.tryLocalAction(this.api.applyCastle(c.side, from), {
           type: "castle",
           side: c.side,
+          from,
         });
         return;
       }
@@ -1010,8 +1017,8 @@ class App {
     if (this.selected && this.isMyTurn()) {
       for (const m of this.legalTargets(this.selected)) legalTo.add(m.to);
       for (const c of this.castlesFrom(this.selected)) {
-        const kingRank = this.game.turn === "white" ? "1" : "8";
-        legalTo.add(c.side === "king" ? `g${kingRank}` : `c${kingRank}`);
+        if (c.to) legalTo.add(c.to);
+        if (c.rook) legalTo.add(c.rook);
       }
     }
 

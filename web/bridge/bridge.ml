@@ -58,21 +58,25 @@ let status_to_js (st : Rules.status) =
     val color = color
   end
 
-let move_to_js = function
-  | Moves.Castle { side = `King; from } ->
+let move_to_js pos = function
+  | Moves.Castle { side; from } ->
+      let side_s = match side with `King -> "king" | `Queen -> "queen" in
+      let king_to_s, rook_s =
+        match
+          Moves.castle_specs pos
+          |> List.find_opt (fun (s : Moves.castle_spec) ->
+                 s.side = side && s.king_from = from)
+        with
+        | Some spec ->
+            (square_to_alg spec.king_to, square_to_alg spec.rook_from)
+        | None -> ("", "")
+      in
       object%js
         val kind = Js.string "castle"
-        val side = Js.string "king"
+        val side = Js.string side_s
         val from_ = Js.string (square_to_alg from)
-        val to_ = Js.string ""
-        val promotion = Js.null
-      end
-  | Moves.Castle { side = `Queen; from } ->
-      object%js
-        val kind = Js.string "castle"
-        val side = Js.string "queen"
-        val from_ = Js.string (square_to_alg from)
-        val to_ = Js.string ""
+        val to_ = Js.string king_to_s
+        val rook = Js.string rook_s
         val promotion = Js.null
       end
   | Moves.Normal { from; to_; promotion } ->
@@ -86,6 +90,7 @@ let move_to_js = function
         val side = Js.string ""
         val from_ = Js.string (square_to_alg from)
         val to_ = Js.string (square_to_alg to_)
+        val rook = Js.string ""
         val promotion = promo
       end
 
@@ -117,7 +122,8 @@ let snapshot g =
     val blackDrawOffer = Js.bool black_draw
     val board = board_to_js (Game_engine.board g)
     val legalMoves =
-      Game_engine.legal_moves g |> List.map move_to_js |> Array.of_list
+      let pos = Game_engine.position g in
+      Game_engine.legal_moves g |> List.map (move_to_js pos) |> Array.of_list
       |> Js.array
   end
 
@@ -187,17 +193,18 @@ let apply_move from_js to_js promo_js =
   let move = Moves.Normal { from; to_; promotion } in
   apply_engine_result (Game_engine.apply_move g move)
 
-let apply_castle side_js =
+let apply_castle side_js from_js =
   let g = require_game () in
   let want =
     match Js.to_string side_js with
     | "queen" -> `Queen
     | _ -> `King
   in
+  let from = alg_to_square (Js.to_string from_js) in
   match
     Game_engine.legal_moves g
     |> List.find_opt (function
-         | Moves.Castle { side; _ } -> side = want
+         | Moves.Castle { side; from = f } -> side = want && f = from
          | _ -> false)
   with
   | Some m -> apply_engine_result (Game_engine.apply_move g m)
@@ -230,7 +237,7 @@ let () =
        method ofFen fen = of_fen fen
        method applyNotation n = apply_notation n
        method applyMove f t p = apply_move f t p
-       method applyCastle s = apply_castle s
+       method applyCastle s f = apply_castle s f
        method undo = undo ()
        method resign = resign ()
        method offerDraw = offer_draw ()

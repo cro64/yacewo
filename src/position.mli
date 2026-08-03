@@ -12,6 +12,7 @@ type castling_rights = {
 type castle_style =
   | Standard
   | Flexible
+  | Chess960
   | Disabled
 
 type ruleset = {
@@ -48,7 +49,7 @@ val rules_anarchy : ruleset
 (** Same ruleset as classical (layout differs, not royalty). *)
 
 val rules_chess960 : ruleset
-(** Critical king, castling disabled for now. *)
+(** Critical king, Chess960 castling (c/g and d/f ends), normal promotions. *)
 
 val rules_double_kings : ruleset
 (** Critical kings, flexible castling, king-capable promotion. *)
