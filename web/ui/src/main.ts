@@ -72,6 +72,24 @@ function statusText(game: GameSnapshot): string {
   }
 }
 
+function drawOfferText(game: GameSnapshot): string | null {
+  if (game.isOver) return null;
+  const white = game.whiteDrawOffer;
+  const black = game.blackDrawOffer;
+  if (!white && !black) return null;
+  if (white && black) return "Draw offered by both sides";
+  if (white && game.turn === "black") return "White offered a draw — accept or move";
+  if (black && game.turn === "white") return "Black offered a draw — accept or move";
+  if (white && game.turn === "white") return "White offered a draw — play your move";
+  if (black && game.turn === "black") return "Black offered a draw — play your move";
+  return null;
+}
+
+function canAcceptDraw(game: GameSnapshot): boolean {
+  if (game.isOver) return false;
+  return game.turn === "white" ? game.blackDrawOffer : game.whiteDrawOffer;
+}
+
 function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
@@ -346,8 +364,9 @@ class App {
     if (!this.game) return this.renderLanding();
     const g = this.game;
     const metaClass = g.seed != null ? "status-meta anarchy" : "status-meta";
-    const meta =
-      g.seed != null ? `Anarchy · seed ${g.seed}` : "Classical";
+    const meta = g.seed != null ? "Anarchy" : "Classical";
+    const offer = drawOfferText(g);
+    const drawLabel = canAcceptDraw(g) ? "Accept draw" : "Draw";
     return `
       ${this.renderTopbar(true)}
       <main class="play">
@@ -356,6 +375,11 @@ class App {
             <span class="status-turn">${escapeHtml(statusText(g))}</span>
             <span class="${metaClass}">${escapeHtml(meta)}</span>
           </div>
+          ${
+            offer
+              ? `<div class="draw-offer" role="status">${escapeHtml(offer)}</div>`
+              : ""
+          }
           ${this.renderBoard()}
           <form class="algebraic" data-form="notation">
             <input name="notation" placeholder="e4 · Nf3 · O-O" autocomplete="off" value="${escapeAttr(this.notation)}" ${g.isOver ? "disabled" : ""} />
@@ -383,7 +407,7 @@ class App {
           }
           <div class="actions">
             <button type="button" class="action-btn" data-action="undo" ${g.isOver ? "disabled" : ""}>Undo</button>
-            <button type="button" class="action-btn" data-action="draw" ${g.isOver ? "disabled" : ""}>Draw</button>
+            <button type="button" class="action-btn${canAcceptDraw(g) ? " draw-accept" : ""}" data-action="draw" ${g.isOver ? "disabled" : ""}>${drawLabel}</button>
             <button type="button" class="action-btn" data-action="resign" ${g.isOver ? "disabled" : ""}>Resign</button>
             <button type="button" class="action-btn" data-action="help">Help</button>
             <button type="button" class="action-btn" data-action="new">New game</button>
