@@ -94,8 +94,11 @@ function drawOfferText(game: GameSnapshot): string | null {
   return null;
 }
 
-function canAcceptDraw(game: GameSnapshot): boolean {
+/** True when the side to move can accept an outstanding opponent offer. */
+function canAcceptDraw(game: GameSnapshot, myColor: Color | null = null): boolean {
   if (game.isOver) return false;
+  // Remote: only the side to move may accept (never on the opponent's clock).
+  if (myColor != null && game.turn !== myColor) return false;
   return game.turn === "white" ? game.blackDrawOffer : game.whiteDrawOffer;
 }
 
@@ -106,6 +109,27 @@ function cap(s: string): string {
 function pieceGlyph(p: Piece | null): string {
   if (!p) return "";
   return PIECES[`${p.color}-${p.kind}`] ?? "";
+}
+
+/** Shareable join URL for GitHub Pages (`/yacewo/?room=ABC123`). */
+function roomShareUrl(room: string): string {
+  const url = new URL(import.meta.env.BASE_URL || "/", location.origin);
+  url.searchParams.set("room", room);
+  return url.href;
+}
+
+function syncRoomInUrl(room: string | null) {
+  const url = new URL(location.href);
+  if (room) url.searchParams.set("room", room);
+  else url.searchParams.delete("room");
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (next !== `${location.pathname}${location.search}${location.hash}`) {
+    history.replaceState(null, "", next);
+  }
+}
+
+function roomFromUrl(): string {
+  return normalizeRoom(new URLSearchParams(location.search).get("room") ?? "");
 }
 
 class App {
@@ -154,8 +178,19 @@ class App {
   }
 
   private captureSetup(): GameSetup {
-    if (this.mode === "classical") return { kind: "classical" };
+    const fen = this.fenInput.trim();
+    if (fen !== "") {
+      const check = this.api.ofFen(fen);
+      if (!check.ok || !check.game) {
+        throw new Error(check.error ?? "Invalid FEN");
+      }
+      return { kind: "fen", fen };
+    }
+
     const trimmed = this.seedInput.trim();
+    const useAnarchy = this.mode === "anarchy" || trimmed !== "";
+    if (!useAnarchy) return { kind: "classical" };
+
     if (trimmed === "") {
       const seed = this.anarchyPreviewSeed;
       if (seed == null) throw new Error("Pick or roll an Anarchy seed first");
@@ -244,6 +279,7 @@ class App {
       this.net?.destroy();
       this.net = null;
       this.netStatus = { phase: "idle" };
+      syncRoomInUrl(null);
     }
   }
 
@@ -288,6 +324,9 @@ class App {
         result = this.api.resign();
         break;
       case "draw":
+        // Draw is always attributed to the side to move. Ignore if the
+        // opponent sent it on our clock (would let them accept their own offer).
+        if (!this.myColor || this.game.turn === this.myColor) return;
         result = this.api.offerDraw();
         break;
       default:
@@ -310,7 +349,8 @@ class App {
       this.remoteSetup = setup;
       this.screen = "lobby";
       this.render();
-      await this.ensureNet().createRoom();
+      const room = await this.ensureNet().createRoom();
+      syncRoomInUrl(room);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
       this.teardownRemote(true);
@@ -319,15 +359,17 @@ class App {
     }
   }
 
-  private async joinRemoteRoom() {
+  private async joinRemoteRoom(rawCode?: string) {
     this.error = "";
-    const code = normalizeRoom(this.remoteJoinCode);
+    const code = normalizeRoom(rawCode ?? this.remoteJoinCode);
+    this.remoteJoinCode = code;
     if (code.length < 4) {
       this.error = "Enter a valid room code";
       this.joinOpen = true;
       this.render();
       return;
     }
+    syncRoomInUrl(code);
     this.screen = "lobby";
     this.render();
     try {
@@ -355,6 +397,11 @@ class App {
     try {
       this.api = await loadEngine();
       this.refreshPreview(false);
+      const linkRoom = roomFromUrl();
+      if (linkRoom.length >= 4) {
+        await this.joinRemoteRoom(linkRoom);
+        return;
+      }
       this.render();
     } catch (e) {
       this.root.innerHTML = `<div class="boot-error"><h1>Could not load engine</h1><p>${
@@ -654,9 +701,16 @@ class App {
             room && st.phase !== "error"
               ? `<div class="lobby-code" aria-label="Room code">${escapeHtml(room)}</div>
                  <div class="lobby-actions">
+                   <button type="button" class="text-btn" data-action="copy-room-link">Copy link</button>
                    <button type="button" class="text-btn" data-action="copy-room">Copy code</button>
                  </div>
-                 <p class="lobby-hint">Share this code. Host plays White.</p>`
+                 <p class="lobby-hint">Share the link to auto-join. Host plays White.${
+                   this.remoteSetup?.kind === "fen"
+                     ? " Starting from FEN."
+                     : this.remoteSetup?.kind === "anarchy"
+                       ? ` Anarchy seed ${this.remoteSetup.seed}.`
+                       : ""
+                 }</p>`
               : st.phase === "error"
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
                 : ""
@@ -751,13 +805,16 @@ class App {
     const metaClass = g.seed != null ? "status-meta anarchy" : "status-meta";
     const meta = g.seed != null ? "Anarchy" : "Classical";
     const offer = drawOfferText(g);
-    const drawLabel = canAcceptDraw(g) ? "Accept draw" : "Draw";
+    const acceptDraw = canAcceptDraw(g, this.myColor);
+    const drawLabel = acceptDraw ? "Accept draw" : "Draw";
     const you = this.myColor ? cap(this.myColor) : null;
     const room =
       this.netStatus.phase === "connected" || this.netStatus.phase === "waiting"
         ? this.netStatus.room
         : this.net?.getRoom() || "";
     const inputLocked = !this.isMyTurn();
+    const drawLocked =
+      g.isOver || (this.isRemote() && !this.isMyTurn());
     return `
       ${this.renderTopbar(true)}
       <main class="play">
@@ -807,8 +864,8 @@ class App {
           }
           <div class="actions">
             <button type="button" class="action-btn" data-action="undo" ${g.isOver ? "disabled" : ""}>Undo</button>
-            <button type="button" class="action-btn${canAcceptDraw(g) ? " draw-accept" : ""}" data-action="draw" ${
-              g.isOver || (this.isRemote() && !this.isMyTurn() && !canAcceptDraw(g)) ? "disabled" : ""
+            <button type="button" class="action-btn${acceptDraw ? " draw-accept" : ""}" data-action="draw" ${
+              drawLocked ? "disabled" : ""
             }>${drawLabel}</button>
             <button type="button" class="action-btn" data-action="resign" ${
               g.isOver || (this.isRemote() && !this.isMyTurn()) ? "disabled" : ""
@@ -826,7 +883,7 @@ class App {
                     <li>Undo takes back the last half-move.</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed as a 7th field.</li>
-                    <li>Remote: Create or Join a room. Host is White; moves sync over peer-to-peer.</li>
+                    <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer.</li>
                   </ul>
                 </div>`
               : ""
@@ -1009,6 +1066,16 @@ class App {
         this.render();
       }
     });
+    this.root.querySelector("[data-action='copy-room-link']")?.addEventListener("click", async () => {
+      const room = this.net?.getRoom() || "";
+      if (!room) return;
+      try {
+        await navigator.clipboard.writeText(roomShareUrl(room));
+      } catch {
+        this.error = "Could not copy room link";
+        this.render();
+      }
+    });
 
     const fen = this.root.querySelector<HTMLTextAreaElement>("#fen");
     fen?.addEventListener("input", () => {
@@ -1078,9 +1145,8 @@ class App {
       this.tryLocalAction(this.api.resign(), { type: "resign" });
     });
     this.root.querySelector("[data-action='draw']")?.addEventListener("click", () => {
-      if (this.isRemote() && !this.isMyTurn() && !(this.game && canAcceptDraw(this.game))) {
-        return;
-      }
+      // Offer and accept both happen on your own turn (accept after opponent offered).
+      if (this.isRemote() && !this.isMyTurn()) return;
       this.tryLocalAction(this.api.offerDraw(), { type: "draw" });
     });
     this.root.querySelector("[data-action='help']")?.addEventListener("click", () => {
