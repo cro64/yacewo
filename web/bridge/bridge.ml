@@ -105,6 +105,7 @@ let snapshot g =
     | None -> Js.null
     | Some s -> Js.some s
   in
+  let white_draw, black_draw = Game_engine.draw_offers g in
   object%js
     val fen = Js.string (Game_engine.to_fen g)
     val moveList = Js.string (Game_engine.move_list g)
@@ -112,6 +113,8 @@ let snapshot g =
     val status = status_to_js (Game_engine.status g)
     val isOver = Js.bool (Game_engine.is_over g)
     val seed = seed
+    val whiteDrawOffer = Js.bool white_draw
+    val blackDrawOffer = Js.bool black_draw
     val board = board_to_js (Game_engine.board g)
     val legalMoves =
       Game_engine.legal_moves g |> List.map move_to_js |> Array.of_list

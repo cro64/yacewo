@@ -32,6 +32,8 @@ export interface GameSnapshot {
   status: Status;
   isOver: boolean;
   seed: number | null;
+  whiteDrawOffer: boolean;
+  blackDrawOffer: boolean;
   board: Array<Piece | null>;
   legalMoves: LegalMove[];
 }

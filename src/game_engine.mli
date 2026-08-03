@@ -50,4 +50,8 @@ val offer_draw : t -> t
 (** Offer / accept draw. Agreement ends the game when both sides have offered
     without an intervening move clearing the opponent's offer. *)
 
+val draw_offers : t -> bool * bool
+(** [(white_offered, black_offered)]. A side's offer persists until the other
+    side moves (or the game ends by agreement). *)
+
 val is_over : t -> bool

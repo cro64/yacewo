@@ -402,9 +402,11 @@ let engine_meta_tests =
       assert_bool "over" (is_over g) );
     ( "draw agreement" >:: fun _ ->
       (* White offers, White moves (offer persists), Black offers → agreement. *)
-      let g =
-        create `Classical |> offer_draw |> fun g -> apply_str g "e4" |> offer_draw
-      in
+      let g0 = create `Classical |> offer_draw in
+      assert_equal (true, false) (draw_offers g0);
+      let g1 = apply_str g0 "e4" in
+      assert_equal (true, false) (draw_offers g1);
+      let g = offer_draw g1 in
       assert_equal DrawAgreement (status g);
       assert_bool "over" (is_over g) );
   ]

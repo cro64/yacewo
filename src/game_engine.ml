@@ -174,3 +174,5 @@ let offer_draw g =
     if g.white_draw && g.black_draw then
       { g with terminal = Some DrawAgreement }
     else g
+
+let draw_offers g = (g.white_draw, g.black_draw)
