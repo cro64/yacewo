@@ -320,8 +320,8 @@ class App {
         result = this.api.applyNotation(msg.n);
         break;
       case "undo":
-        result = this.api.undo();
-        break;
+        // Undo is disabled for remote play; ignore stale peers.
+        return;
       case "resign":
         result = this.api.resign();
         break;
@@ -815,6 +815,7 @@ class App {
         ? this.netStatus.room
         : this.net?.getRoom() || "";
     const inputLocked = !this.isMyTurn();
+    const undoLocked = g.isOver || this.isRemote();
     const drawLocked =
       g.isOver || (this.isRemote() && !this.isMyTurn());
     return `
@@ -865,7 +866,9 @@ class App {
               : ""
           }
           <div class="actions">
-            <button type="button" class="action-btn" data-action="undo" ${g.isOver ? "disabled" : ""}>Undo</button>
+            <button type="button" class="action-btn" data-action="undo" ${
+              undoLocked ? "disabled" : ""
+            }>Undo</button>
             <button type="button" class="action-btn${acceptDraw ? " draw-accept" : ""}" data-action="draw" ${
               drawLocked ? "disabled" : ""
             }>${drawLabel}</button>
@@ -882,7 +885,7 @@ class App {
                   <ul>
                     <li>Click a piece, then a highlighted square.</li>
                     <li>Or type notation: e4, Nf3, O-O, exd5, e8=Q.</li>
-                    <li>Undo takes back the last half-move.</li>
+                    <li>Undo takes back the last half-move (hotseat only).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed as a 7th field.</li>
                     <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer.</li>
@@ -1140,6 +1143,7 @@ class App {
     });
 
     this.root.querySelector("[data-action='undo']")?.addEventListener("click", () => {
+      if (this.isRemote()) return;
       this.tryLocalAction(this.api.undo(), { type: "undo" });
     });
     this.root.querySelector("[data-action='resign']")?.addEventListener("click", () => {
