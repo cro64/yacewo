@@ -11,6 +11,7 @@ _coverage/
 bisect*.coverage
 
 # --- Node / Vite ---
+node_modules/
 web/ui/node_modules/
 web/ui/dist/
 web/ui/.vite/
