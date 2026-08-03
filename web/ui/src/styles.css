@@ -1138,12 +1138,7 @@ html[data-theme="dark"] .primary-btn {
 
 .piece.white {
   color: var(--piece-w);
-  text-shadow:
-    -1px 0 0 var(--piece-w-edge),
-    1px 0 0 var(--piece-w-edge),
-    0 -1px 0 var(--piece-w-edge),
-    0 1px 0 var(--piece-w-edge),
-    0 1px 1px color-mix(in srgb, var(--ink) 22%, transparent);
+  text-shadow: 0 1px 1px color-mix(in srgb, var(--ink) 18%, transparent);
   filter: none;
   -webkit-text-stroke: 0;
 }
@@ -1304,11 +1299,7 @@ html[data-theme="dark"] .primary-btn {
   font-variant-emoji: text;
   font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2",
     "DejaVu Sans", var(--font-display), serif;
-  text-shadow:
-    -1px 0 0 var(--piece-w-edge),
-    1px 0 0 var(--piece-w-edge),
-    0 -1px 0 var(--piece-w-edge),
-    0 1px 0 var(--piece-w-edge);
+  text-shadow: 0 1px 1px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
 .loading,

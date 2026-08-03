@@ -32,14 +32,13 @@ type ActionMsg = Exclude<NetMsg, { type: "hello" } | { type: "ready" }>;
 const TEXT = "\uFE0E";
 
 const PIECES: Record<string, string> = {
-  // White series (outline) + black series (filled). On platforms that ignore
-  // FE0E and emoji-render chess glyphs, the codepoint still encodes side color.
-  "white-king": `♔${TEXT}`,
-  "white-queen": `♕${TEXT}`,
-  "white-rook": `♖${TEXT}`,
-  "white-bishop": `♗${TEXT}`,
-  "white-knight": `♘${TEXT}`,
-  "white-pawn": `♙${TEXT}`,
+  // Filled glyphs for both sides; FE0E + CSS color paint white vs black.
+  "white-king": `♚${TEXT}`,
+  "white-queen": `♛${TEXT}`,
+  "white-rook": `♜${TEXT}`,
+  "white-bishop": `♝${TEXT}`,
+  "white-knight": `♞${TEXT}`,
+  "white-pawn": `♟${TEXT}`,
   "black-king": `♚${TEXT}`,
   "black-queen": `♛${TEXT}`,
   "black-rook": `♜${TEXT}`,
@@ -49,10 +48,10 @@ const PIECES: Record<string, string> = {
 };
 
 const PROMO_GLYPH: Record<string, string> = {
-  queen: `♕${TEXT}`,
-  rook: `♖${TEXT}`,
-  bishop: `♗${TEXT}`,
-  knight: `♘${TEXT}`,
+  queen: `♛${TEXT}`,
+  rook: `♜${TEXT}`,
+  bishop: `♝${TEXT}`,
+  knight: `♞${TEXT}`,
 };
 
 function fileRank(i: number): { file: number; rank: number; alg: string } {
