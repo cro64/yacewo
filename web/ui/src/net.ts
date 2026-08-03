@@ -11,6 +11,7 @@ export type GameSetup =
 export type NetMsg =
   | { type: "hello"; setup: GameSetup }
   | { type: "ready" }
+  | { type: "sync"; fen: string; seed: number | null; moveList: string }
   | { type: "move"; from: string; to: string; promo: string | null }
   | { type: "castle"; side: string }
   | { type: "notation"; n: string }
@@ -32,8 +33,17 @@ export type NetHandlers = {
   onStatus: (status: NetStatus) => void;
   onHello: (setup: GameSetup) => void;
   onReady: () => void;
-  onAction: (msg: Exclude<NetMsg, { type: "hello" } | { type: "ready" }>) => void;
+  onSync: (msg: Extract<NetMsg, { type: "sync" }>) => void;
+  onAction: (
+    msg: Exclude<
+      NetMsg,
+      { type: "hello" } | { type: "ready" } | { type: "sync" }
+    >,
+  ) => void;
+  /** Guest (or fatal) disconnect — tear down / retry at the app layer. */
   onDisconnected: () => void;
+  /** Host: opponent left but the room peer is still open for rejoin. */
+  onPeerLeft: () => void;
 };
 
 function randomRoomCode(len = 6): string {
@@ -80,6 +90,10 @@ export class NetSession {
     return this.role;
   }
 
+  isConnected(): boolean {
+    return !!this.conn?.open;
+  }
+
   async createRoom(): Promise<string> {
     this.disposePeer();
     this.disposed = false;
@@ -94,10 +108,11 @@ export class NetSession {
         await this.openPeer(room);
         this.handlers.onStatus({ phase: "waiting", room });
         this.peer!.on("connection", (conn) => {
-          if (this.conn) {
+          if (this.conn?.open) {
             conn.close();
             return;
           }
+          this.detachConnection();
           this.attachConnection(conn);
         });
         return room;
@@ -236,27 +251,42 @@ export class NetSession {
       if (!msg) return;
       if (msg.type === "hello") this.handlers.onHello(msg.setup);
       else if (msg.type === "ready") this.handlers.onReady();
+      else if (msg.type === "sync") this.handlers.onSync(msg);
       else this.handlers.onAction(msg);
     });
 
-    conn.on("close", () => {
-      if (this.disposed) return;
-      this.handlers.onDisconnected();
-    });
-
-    conn.on("error", () => {
-      if (this.disposed) return;
-      this.handlers.onDisconnected();
-    });
+    conn.on("close", () => this.handleConnLost(conn));
+    conn.on("error", () => this.handleConnLost(conn));
   }
 
-  private disposePeer(): void {
+  private handleConnLost(conn: DataConnection): void {
+    if (this.disposed) return;
+    if (this.conn !== conn) return;
+    this.detachConnection();
+
+    if (this.role === "host" && this.peer && !this.peer.destroyed) {
+      this.handlers.onStatus({ phase: "waiting", room: this.room });
+      this.handlers.onPeerLeft();
+      return;
+    }
+
+    this.handlers.onDisconnected();
+  }
+
+  /** Drop the data channel without destroying the PeerJS peer (host rejoin). */
+  private detachConnection(): void {
+    const conn = this.conn;
+    this.conn = null;
+    if (!conn) return;
     try {
-      this.conn?.close();
+      conn.close();
     } catch {
       /* ignore */
     }
-    this.conn = null;
+  }
+
+  private disposePeer(): void {
+    this.detachConnection();
     try {
       this.peer?.destroy();
     } catch {
@@ -278,6 +308,27 @@ function parseMsg(raw: unknown): NetMsg | null {
     }
     case "ready":
       return { type: "ready" };
+    case "sync": {
+      if (typeof msg.fen !== "string" || !msg.fen.trim()) return null;
+      if (typeof msg.moveList !== "string") return null;
+      let seed: number | null = null;
+      if (msg.seed != null) {
+        if (
+          typeof msg.seed !== "number" ||
+          !Number.isInteger(msg.seed) ||
+          msg.seed < 0
+        ) {
+          return null;
+        }
+        seed = msg.seed;
+      }
+      return {
+        type: "sync",
+        fen: msg.fen.trim(),
+        seed,
+        moveList: msg.moveList,
+      };
+    }
     case "move":
       if (typeof msg.from !== "string" || typeof msg.to !== "string") return null;
       return {

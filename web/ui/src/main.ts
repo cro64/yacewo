@@ -26,7 +26,14 @@ import {
 } from "./theme";
 
 type Screen = "landing" | "lobby" | "play";
-type ActionMsg = Exclude<NetMsg, { type: "hello" } | { type: "ready" }>;
+type ActionMsg = Exclude<
+  NetMsg,
+  { type: "hello" } | { type: "ready" } | { type: "sync" }
+>;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 /** Text-presentation selector — keeps pieces monochrome so CSS color works on iOS. */
 const TEXT = "\uFE0E";
@@ -192,11 +199,23 @@ class App {
   /** Set in remote games; null means local hotseat. */
   private myColor: Color | null = null;
   private remoteSetup: GameSetup | null = null;
+  /** Guest mid-game reconnect in progress. */
+  private reconnecting = false;
+  /** Bumps to cancel an in-flight guest rejoin loop (Quit / new session). */
+  private rejoinGeneration = 0;
   /** Which copy button briefly shows “Copied”. */
   private copiedFlash: "fen" | "moves" | "seed" | "room" | "room-link" | null =
     null;
   private copiedTimer: ReturnType<typeof setTimeout> | null = null;
   private keysBound = false;
+  /** Hotseat: when on, board orients to the side to move. Default off. */
+  private autoFlip = false;
+  /** Soft from/to tint for the previous ply. Default off. */
+  private showLastMove = false;
+  /** File/rank gutters around the board. Default off. */
+  private showCoords = false;
+  /** Stack of last-move highlights (popped on undo). */
+  private lastMoves: Array<{ from: string; to: string }> = [];
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -236,10 +255,11 @@ class App {
     this.keysBound = true;
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (!this.pendingPromo && !this.selected) return;
+      if (!this.pendingPromo && !this.selected && !this.helpOpen) return;
       e.preventDefault();
       this.pendingPromo = null;
       this.selected = null;
+      this.helpOpen = false;
       this.render();
     });
   }
@@ -248,9 +268,72 @@ class App {
     return this.myColor != null;
   }
 
+  /** Square of the king in check / checkmate, if any. */
+  private checkKingSquare(): string | null {
+    if (!this.game) return null;
+    const tag = this.game.status.tag;
+    if (tag !== "check" && tag !== "checkmate") return null;
+    const color = this.game.status.color ?? this.game.turn;
+    for (let i = 0; i < 64; i++) {
+      const p = this.game.board[i];
+      if (p && p.kind === "king" && p.color === color) return fileRank(i).alg;
+    }
+    return null;
+  }
+
+  private boardIsFlipped(): boolean {
+    if (this.isRemote()) return this.myColor === "black";
+    return this.autoFlip && this.game?.turn === "black";
+  }
+
+  private castleHighlight(side: string, color: Color): { from: string; to: string } {
+    const rank = color === "white" ? "1" : "8";
+    return {
+      from: `e${rank}`,
+      to: side === "king" ? `g${rank}` : `c${rank}`,
+    };
+  }
+
+  private noteActionHighlight(msg: ActionMsg | null) {
+    if (!msg) return;
+    switch (msg.type) {
+      case "undo":
+        this.lastMoves.pop();
+        break;
+      case "move":
+        this.lastMoves.push({ from: msg.from, to: msg.to });
+        break;
+      case "castle":
+        if (this.game) {
+          this.lastMoves.push(this.castleHighlight(msg.side, this.game.turn));
+        }
+        break;
+      case "notation":
+        // No from/to from the notation API — drop the highlight.
+        this.lastMoves = [];
+        break;
+      default:
+        break;
+    }
+  }
+
+  private clearMoveHighlights() {
+    this.lastMoves = [];
+  }
+
+  private currentLastMove(): { from: string; to: string } | null {
+    if (!this.showLastMove || this.lastMoves.length === 0) return null;
+    return this.lastMoves[this.lastMoves.length - 1] ?? null;
+  }
+
+  private isNetLive(): boolean {
+    return this.netStatus.phase === "connected" && !!this.net?.isConnected();
+  }
+
   private isMyTurn(): boolean {
     if (!this.game || this.game.isOver) return false;
     if (!this.myColor) return true;
+    if (!this.isNetLive()) return false;
     return this.game.turn === this.myColor;
   }
 
@@ -298,8 +381,19 @@ class App {
         this.netStatus = status;
         if (status.phase === "connected" && status.role === "host" && this.remoteSetup) {
           try {
-            this.net?.send({ type: "hello", setup: this.remoteSetup });
-            this.beginRemoteGame(this.remoteSetup, "white");
+            if (this.game && this.myColor === "white") {
+              this.net?.send({
+                type: "sync",
+                fen: this.game.fen,
+                seed: this.game.seed,
+                moveList: this.game.moveList,
+              });
+              this.error = "";
+              this.render();
+            } else {
+              this.net?.send({ type: "hello", setup: this.remoteSetup });
+              this.beginRemoteGame(this.remoteSetup, "white");
+            }
           } catch (err) {
             this.error = err instanceof Error ? err.message : String(err);
             this.render();
@@ -309,7 +403,10 @@ class App {
         this.render();
       },
       onHello: (setup) => {
+        // Mid-game rejoins use sync; ignore a stray hello if already playing.
+        if (this.game && this.myColor === "black") return;
         try {
+          this.reconnecting = false;
           this.beginRemoteGame(setup, "black");
           this.net?.send({ type: "ready" });
         } catch (err) {
@@ -320,12 +417,33 @@ class App {
       onReady: () => {
         /* host already in play */
       },
+      onSync: (msg) => this.applySync(msg),
       onAction: (msg) => this.applyRemoteAction(msg),
+      onPeerLeft: () => {
+        this.selected = null;
+        this.pendingPromo = null;
+        if (this.screen === "play" && this.myColor === "white") {
+          this.error = "Opponent left — waiting to rejoin";
+        }
+        this.render();
+      },
       onDisconnected: () => {
-        const stayedOnPlay = this.screen === "play" && this.game != null;
+        const room =
+          this.net?.getRoom() ||
+          this.remoteJoinCode ||
+          roomFromUrl();
+        const wasGuest = this.myColor === "black";
+        const stayPlay = this.screen === "play" && this.game != null;
+
+        if (wasGuest && room.length >= 4 && stayPlay) {
+          void this.rejoinAsGuest(room);
+          return;
+        }
+
+        this.reconnecting = false;
         this.error = "Opponent disconnected";
         this.teardownRemote(true);
-        if (!stayedOnPlay) this.screen = "landing";
+        if (!stayPlay) this.screen = "landing";
         this.render();
       },
     });
@@ -343,13 +461,75 @@ class App {
     }
     this.remoteSetup = setup;
     this.myColor = color;
+    this.reconnecting = false;
+    this.clearMoveHighlights();
     this.setGame(result.game);
     this.screen = "play";
     this.error = "";
     this.render();
   }
 
+  private applySync(msg: Extract<NetMsg, { type: "sync" }>) {
+    const result = this.api.ofFen(msg.fen);
+    if (!result.ok || !result.game) {
+      this.error = result.error ?? "Could not sync position";
+      this.render();
+      return;
+    }
+    const game: GameSnapshot = {
+      ...result.game,
+      seed: msg.seed,
+      moveList: msg.moveList || result.game.moveList,
+    };
+    this.myColor = "black";
+    this.reconnecting = false;
+    this.clearMoveHighlights();
+    this.setGame(game);
+    this.screen = "play";
+    this.error = "";
+    this.render();
+  }
+
+  private async rejoinAsGuest(room: string) {
+    const gen = ++this.rejoinGeneration;
+    this.remoteJoinCode = room;
+    syncRoomInUrl(room);
+    this.reconnecting = true;
+    this.error = "Reconnecting…";
+    this.render();
+
+    const delays = [400, 800, 1500, 2500, 4000];
+    for (let i = 0; i < delays.length; i++) {
+      if (gen !== this.rejoinGeneration || this.myColor !== "black") return;
+      try {
+        await this.ensureNet().joinRoom(room);
+        if (gen !== this.rejoinGeneration) return;
+        // Connected — wait for sync (or hello) via handlers.
+        this.error = "Reconnecting…";
+        this.render();
+        return;
+      } catch {
+        if (gen !== this.rejoinGeneration || this.myColor !== "black") return;
+        this.error = "Reconnecting…";
+        this.render();
+        await sleep(delays[i]!);
+      }
+    }
+
+    if (gen !== this.rejoinGeneration) return;
+    this.reconnecting = false;
+    this.error = "Could not rejoin — enter the room code again";
+    this.teardownRemote(true);
+    this.remoteJoinCode = room;
+    this.joinOpen = true;
+    syncRoomInUrl(room);
+    this.screen = this.game ? "play" : "landing";
+    this.render();
+  }
+
   private teardownRemote(destroyNet: boolean) {
+    this.rejoinGeneration += 1;
+    this.reconnecting = false;
     this.myColor = null;
     this.remoteSetup = null;
     if (destroyNet) {
@@ -361,7 +541,7 @@ class App {
   }
 
   private sendAction(msg: ActionMsg) {
-    if (!this.isRemote() || !this.net) return;
+    if (!this.isRemote() || !this.net || !this.isNetLive()) return;
     try {
       this.net.send(msg);
     } catch (err) {
@@ -375,6 +555,7 @@ class App {
       this.render();
       return;
     }
+    this.noteActionHighlight(msg);
     this.setGame(result.game);
     this.screen = "play";
     if (msg) this.sendAction(msg);
@@ -414,6 +595,7 @@ class App {
       this.render();
       return;
     }
+    this.noteActionHighlight(msg);
     this.setGame(result.game);
     this.render();
   }
@@ -560,6 +742,7 @@ class App {
       this.render();
       return;
     }
+    this.clearMoveHighlights();
     this.setGame(result.game);
     this.screen = okScreen;
     this.render();
@@ -820,7 +1003,9 @@ class App {
 
   private renderBoard() {
     if (!this.game) return "";
-    const flipped = this.myColor === "black";
+    const flipped = this.boardIsFlipped();
+    const checkSq = this.checkKingSquare();
+    const last = this.currentLastMove();
     const legalTo = new Set<string>();
     if (this.selected && this.isMyTurn()) {
       for (const m of this.legalTargets(this.selected)) legalTo.add(m.to);
@@ -842,6 +1027,8 @@ class App {
           "sq",
           light ? "light" : "dark",
           this.selected === alg ? "selected" : "",
+          checkSq === alg ? "check" : "",
+          last && (last.from === alg || last.to === alg) ? "last-move" : "",
           legalTo.has(alg) ? "legal" : "",
           piece ? "has-piece" : "",
         ]
@@ -862,14 +1049,14 @@ class App {
       : ["a", "b", "c", "d", "e", "f", "g", "h"];
     const ranks = rankNums.map((r) => `<span>${r}</span>`).join("");
     const files = fileLetters.map((f) => `<span>${f}</span>`).join("");
+    const stageClass = this.showCoords ? "board-stage" : "board-stage no-coords";
 
     return `
       <div class="board-plate">
-        <div class="board-stage">
-          <div class="rank-gutter" aria-hidden="true">${ranks}</div>
+        <div class="${stageClass}">
+          ${this.showCoords ? `<div class="rank-gutter" aria-hidden="true">${ranks}</div>` : ""}
           <div class="board" role="grid" aria-label="Chess board">${squares}</div>
-          <div></div>
-          <div class="file-gutter" aria-hidden="true">${files}</div>
+          ${this.showCoords ? `<div></div><div class="file-gutter" aria-hidden="true">${files}</div>` : ""}
         </div>
       </div>
     `;
@@ -912,6 +1099,17 @@ class App {
     const undoLocked = g.isOver || this.isRemote();
     const drawLocked =
       g.isOver || (this.isRemote() && !this.isMyTurn());
+    const waitingRejoin =
+      this.isRemote() && this.netStatus.phase === "waiting" && this.myColor === "white";
+    const bannerSuffix = g.isOver
+      ? ""
+      : waitingRejoin
+        ? " · waiting for rejoin"
+        : this.reconnecting
+          ? " · reconnecting"
+          : inputLocked
+            ? " · waiting"
+            : "";
     return `
       ${this.renderTopbar(true)}
       <main class="play">
@@ -924,7 +1122,7 @@ class App {
             you
               ? `<div class="remote-banner" role="status">You are ${escapeHtml(you)}${
                   room ? ` · ${escapeHtml(room)}` : ""
-                }${inputLocked && !g.isOver ? " · waiting" : ""}</div>`
+                }${bannerSuffix}</div>`
               : ""
           }
           ${
@@ -970,6 +1168,15 @@ class App {
                  </div>`
               : ""
           }
+          <div class="panel-pref-row">
+            <button type="button" class="text-btn panel-pref" data-action="toggle-last-move" aria-pressed="${this.showLastMove}">Last move</button>
+            <button type="button" class="text-btn panel-pref" data-action="toggle-coords" aria-pressed="${this.showCoords}">Coords</button>
+            ${
+              !this.isRemote()
+                ? `<button type="button" class="text-btn panel-pref" data-action="toggle-auto-flip" aria-pressed="${this.autoFlip}">Auto-flip</button>`
+                : ""
+            }
+          </div>
           <div class="panel-actions">
             <button type="button" class="action-btn" data-action="undo" ${
               undoLocked ? "disabled" : ""
@@ -988,13 +1195,15 @@ class App {
               ? `<div class="help">
                   <strong>Help</strong>
                   <ul>
-                    <li>Click a piece, then a highlighted square. Escape clears the selection.</li>
+                    <li>Click a piece, then a highlighted square. Escape clears the selection or closes Help.</li>
                     <li>Or type notation: e4, Nf3, O-O, exd5, e8=Q.</li>
                     <li>Undo takes back the last half-move (hotseat only).</li>
+                    <li>Hotseat only: Auto-flip orients the board to the side to move (not available in remote rooms).</li>
+                    <li>Last move and Coords can be toggled above the game actions (off by default).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed as a 7th field.</li>
                     <li>Anarchy seeds are shareable as <code>?seed=…</code> links.</li>
-                    <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer.</li>
+                    <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
                   </ul>
                 </div>`
               : ""
@@ -1241,6 +1450,7 @@ class App {
         return;
       }
       this.setGame(result.game);
+      this.clearMoveHighlights();
       this.notation = "";
       this.sendAction({ type: "notation", n: trimmed });
       this.render();
@@ -1261,6 +1471,19 @@ class App {
     });
     this.root.querySelector("[data-action='help']")?.addEventListener("click", () => {
       this.helpOpen = !this.helpOpen;
+      this.render();
+    });
+    this.root.querySelector("[data-action='toggle-last-move']")?.addEventListener("click", () => {
+      this.showLastMove = !this.showLastMove;
+      this.render();
+    });
+    this.root.querySelector("[data-action='toggle-coords']")?.addEventListener("click", () => {
+      this.showCoords = !this.showCoords;
+      this.render();
+    });
+    this.root.querySelector("[data-action='toggle-auto-flip']")?.addEventListener("click", () => {
+      if (this.isRemote()) return;
+      this.autoFlip = !this.autoFlip;
       this.render();
     });
     this.root.querySelector("[data-action='new']")?.addEventListener("click", () => {

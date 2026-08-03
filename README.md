@@ -14,19 +14,20 @@ seeded armies, and **peer-to-peer rooms** you can share with a link.
 ## Features
 
 - **Classical** — standard chess with castling, promotion, en passant, checkmate, and draws
-- **Anarchy** — seeded random armies (kings fixed); same seed → same position
-- **Remote play** — Create Room, share a link or code; guest auto-joins; host is White
-- **Hotseat** — local two-player on one device
-- **FEN & Seed** — load positions (optional 7th-field Anarchy seed); copy FEN from the panel
+- **Anarchy** — seeded random armies (kings fixed); same seed → same position; shareable `?seed=…` links
+- **Remote play** — Create Room, share a link or code; guest auto-joins; host is White (undo disabled online)
+- **Board prefs** — optional Last move highlights and Coords (off by default); Escape clears selection / Help
+- **Hotseat** — local two-player on one device; optional Auto-flip (hotseat only) keeps the side to move at the bottom
+- **FEN & Seed** — load positions (optional 7th-field Anarchy seed); copy FEN, moves, or seed from the panel
 - **Notation** — click-to-move or type `e4`, `Nf3`, `O-O`, …
-- **Undo / Resign / Draw** — including offer-and-accept draws
+- **Undo / Resign / Draw / Quit** — offer-and-accept draws; Undo is hotseat only
 
 ## Screenshots
 
 ### Landing
 
 Classical or Anarchy, then Play — or create / join a remote room. FEN and Seed
-open when you need a custom start.
+open when you need a custom start. Anarchy seeds sync into the URL as `?seed=…`.
 
 <p>
   <img src="images/landing.png" alt="YACEWO landing — Classical or Anarchy, Create or Join Room" width="720" />
@@ -43,7 +44,7 @@ Standard rules, move list, live FEN, and the usual game actions.
 ### Anarchy
 
 Pick or roll a seed; the army layout is reproducible and shown in the panel
-(and in FEN as a seventh field).
+(and in FEN as a seventh field). Open `/yacewo/?seed=42` to land on that army.
 
 <p>
   <img src="images/anarchy.png" alt="Anarchy mode with seed 42" width="720" />
@@ -87,4 +88,4 @@ make test
 make play
 ```
 
-See [INSTALL.md](INSTALL.md) for OCaml setup.
+See [INSTALL.md](INSTALL.md) for OCaml and web setup.
