@@ -14,7 +14,9 @@
   <img src="images/anarchy.png" alt="Anarchy mode with seed 42" width="720" />
 </p>
 
-Demo clip (click to download / open): [images/demo.webm](images/demo.webm)
+<p>
+  <img src="images/demo.gif" alt="YACEWO play demo" width="720" />
+</p>
 
 ## About
 

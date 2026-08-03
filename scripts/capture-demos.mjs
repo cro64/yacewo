@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import path from "path";
 import fs from "fs";
+import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -111,12 +112,30 @@ async function waitEngine(page) {
   const videoPath = await vpage.video().path();
   await videoContext.close();
   const destWebm = path.join(OUT, "demo.webm");
+  const destGif = path.join(OUT, "demo.gif");
   fs.renameSync(videoPath, destWebm);
 
+  const ff = spawnSync(
+    "ffmpeg",
+    [
+      "-y",
+      "-i",
+      destWebm,
+      "-vf",
+      "fps=12,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
+      destGif,
+    ],
+    { encoding: "utf8" },
+  );
+  if (ff.status !== 0) {
+    console.warn("ffmpeg GIF conversion failed; install ffmpeg for README demo.gif");
+    if (ff.stderr) console.warn(ff.stderr.slice(-400));
+  }
+
   console.log("Wrote:");
-  for (const f of ["landing.png", "classical.png", "anarchy.png", "demo.webm"]) {
+  for (const f of ["landing.png", "classical.png", "anarchy.png", "demo.webm", "demo.gif"]) {
     const p = path.join(OUT, f);
-    console.log(`  ${f} (${fs.statSync(p).size} bytes)`);
+    if (fs.existsSync(p)) console.log(`  ${f} (${fs.statSync(p).size} bytes)`);
   }
   await browser.close();
 })().catch((e) => {
