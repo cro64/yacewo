@@ -28,28 +28,31 @@ import {
 type Screen = "landing" | "lobby" | "play";
 type ActionMsg = Exclude<NetMsg, { type: "hello" } | { type: "ready" }>;
 
+/** Text-presentation selector — keeps pieces monochrome so CSS color works on iOS. */
+const TEXT = "\uFE0E";
+
 const PIECES: Record<string, string> = {
-  // Use filled (black-series) glyphs for both colors; paint with CSS.
-  // Outline-style white Unicode pieces often render with a muddy halo.
-  "white-king": "♚",
-  "white-queen": "♛",
-  "white-rook": "♜",
-  "white-bishop": "♝",
-  "white-knight": "♞",
-  "white-pawn": "♟",
-  "black-king": "♚",
-  "black-queen": "♛",
-  "black-rook": "♜",
-  "black-bishop": "♝",
-  "black-knight": "♞",
-  "black-pawn": "♟",
+  // White series (outline) + black series (filled). On platforms that ignore
+  // FE0E and emoji-render chess glyphs, the codepoint still encodes side color.
+  "white-king": `♔${TEXT}`,
+  "white-queen": `♕${TEXT}`,
+  "white-rook": `♖${TEXT}`,
+  "white-bishop": `♗${TEXT}`,
+  "white-knight": `♘${TEXT}`,
+  "white-pawn": `♙${TEXT}`,
+  "black-king": `♚${TEXT}`,
+  "black-queen": `♛${TEXT}`,
+  "black-rook": `♜${TEXT}`,
+  "black-bishop": `♝${TEXT}`,
+  "black-knight": `♞${TEXT}`,
+  "black-pawn": `♟${TEXT}`,
 };
 
 const PROMO_GLYPH: Record<string, string> = {
-  queen: "♛",
-  rook: "♜",
-  bishop: "♝",
-  knight: "♞",
+  queen: `♕${TEXT}`,
+  rook: `♖${TEXT}`,
+  bishop: `♗${TEXT}`,
+  knight: `♘${TEXT}`,
 };
 
 function fileRank(i: number): { file: number; rank: number; alg: string } {

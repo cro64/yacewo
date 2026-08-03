@@ -212,7 +212,7 @@ a:focus-visible {
 }
 
 .landing-wash::before {
-  content: "♜";
+  content: "♜\FE0E";
   /* Flank the centered 42rem menu, not the viewport edges. */
   left: calc(50% - min(21rem, 42vw) - 1rem);
   top: 26%;
@@ -222,7 +222,7 @@ a:focus-visible {
 }
 
 .landing-wash::after {
-  content: "♞";
+  content: "♞\FE0E";
   left: calc(50% + min(21rem, 42vw) + 1rem);
   right: auto;
   top: 8%;
@@ -1082,6 +1082,10 @@ html[data-theme="dark"] .primary-btn {
   pointer-events: none;
   transition: transform 140ms var(--ease);
   z-index: 1;
+  /* Prefer monochrome glyphs so .piece.white/.black color applies (esp. iOS). */
+  font-variant-emoji: text;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2",
+    "DejaVu Sans", var(--font-display), serif;
 }
 
 .sq:hover .piece {
@@ -1133,16 +1137,19 @@ html[data-theme="dark"] .primary-btn {
 }
 
 .piece.white {
-  color: #fffdf8;
+  color: var(--piece-w);
   text-shadow:
-    0 0 0.5px color-mix(in srgb, var(--ink) 45%, transparent),
+    -1px 0 0 var(--piece-w-edge),
+    1px 0 0 var(--piece-w-edge),
+    0 -1px 0 var(--piece-w-edge),
+    0 1px 0 var(--piece-w-edge),
     0 1px 1px color-mix(in srgb, var(--ink) 22%, transparent);
   filter: none;
   -webkit-text-stroke: 0;
 }
 
 .piece.black {
-  color: #1a2820;
+  color: var(--piece-b);
   text-shadow: none;
   filter: none;
   -webkit-text-stroke: 0;
@@ -1293,6 +1300,15 @@ html[data-theme="dark"] .primary-btn {
   border: 1px solid var(--line);
   border-radius: 2px;
   background: color-mix(in srgb, var(--moss) 12%, var(--surface));
+  color: var(--piece-w);
+  font-variant-emoji: text;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2",
+    "DejaVu Sans", var(--font-display), serif;
+  text-shadow:
+    -1px 0 0 var(--piece-w-edge),
+    1px 0 0 var(--piece-w-edge),
+    0 -1px 0 var(--piece-w-edge),
+    0 1px 0 var(--piece-w-edge);
 }
 
 .loading,
