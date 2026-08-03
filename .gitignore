@@ -1,8 +1,43 @@
+# --- OCaml / Dune ---
 _build/
-# bisect
-_coverage
+_opam/
+*.install
+*.byte
+*.native
+.merlin
+
+# --- Coverage ---
+_coverage/
 bisect*.coverage
+
+# --- Node / Vite ---
 web/ui/node_modules/
 web/ui/dist/
+web/ui/.vite/
+*.local
+
+# Generated engine copy for local Vite (rebuilt by `make web-engine`).
+# The Pages build lives under docs/ and is committed intentionally.
+web/ui/public/yacewo_engine.js
+
+# --- Secrets / credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*credentials*
+*secret*
+auth.json
+
+# --- OS / editor ---
 .DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+.cursor/
+
+# --- Local research / agent dumps ---
 frost-glass-backgrounds.json
+*.search.json
