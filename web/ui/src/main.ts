@@ -120,18 +120,47 @@ function roomShareUrl(room: string): string {
   return url.href;
 }
 
-function syncRoomInUrl(room: string | null) {
+function replaceSearchParams(mutate: (params: URLSearchParams) => void) {
   const url = new URL(location.href);
-  if (room) url.searchParams.set("room", room);
-  else url.searchParams.delete("room");
+  mutate(url.searchParams);
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (next !== `${location.pathname}${location.search}${location.hash}`) {
     history.replaceState(null, "", next);
   }
 }
 
+function syncRoomInUrl(room: string | null) {
+  replaceSearchParams((params) => {
+    if (room) {
+      params.set("room", room);
+      params.delete("seed");
+    } else {
+      params.delete("room");
+    }
+  });
+}
+
+function syncSeedInUrl(seed: number | null) {
+  replaceSearchParams((params) => {
+    if (seed != null) {
+      params.set("seed", String(seed));
+      params.delete("room");
+    } else {
+      params.delete("seed");
+    }
+  });
+}
+
 function roomFromUrl(): string {
   return normalizeRoom(new URLSearchParams(location.search).get("room") ?? "");
+}
+
+function seedFromUrl(): number | null {
+  const raw = new URLSearchParams(location.search).get("seed");
+  if (raw == null || raw.trim() === "") return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
 }
 
 class App {
@@ -163,10 +192,56 @@ class App {
   /** Set in remote games; null means local hotseat. */
   private myColor: Color | null = null;
   private remoteSetup: GameSetup | null = null;
+  /** Which copy button briefly shows “Copied”. */
+  private copiedFlash: "fen" | "moves" | "seed" | "room" | "room-link" | null =
+    null;
+  private copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  private keysBound = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
     applyTheme(this.theme);
+  }
+
+  private copyLabel(
+    kind: NonNullable<App["copiedFlash"]>,
+    idle: string,
+  ): string {
+    return this.copiedFlash === kind ? "Copied" : idle;
+  }
+
+  private flashCopied(kind: NonNullable<App["copiedFlash"]>) {
+    if (this.copiedTimer != null) clearTimeout(this.copiedTimer);
+    this.copiedFlash = kind;
+    this.render();
+    this.copiedTimer = setTimeout(() => {
+      this.copiedFlash = null;
+      this.copiedTimer = null;
+      this.render();
+    }, 1200);
+  }
+
+  private async copyText(text: string, kind: NonNullable<App["copiedFlash"]>, failLabel: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.flashCopied(kind);
+    } catch {
+      this.error = `Could not copy ${failLabel}`;
+      this.render();
+    }
+  }
+
+  private bindKeys() {
+    if (this.keysBound) return;
+    this.keysBound = true;
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (!this.pendingPromo && !this.selected) return;
+      e.preventDefault();
+      this.pendingPromo = null;
+      this.selected = null;
+      this.render();
+    });
   }
 
   private isRemote(): boolean {
@@ -398,11 +473,16 @@ class App {
     this.root.innerHTML = `<div class="loading"><p>Loading YACEWO engine…</p></div>`;
     try {
       this.api = await loadEngine();
+      this.bindKeys();
       this.refreshPreview(false);
       const linkRoom = roomFromUrl();
       if (linkRoom.length >= 4) {
         await this.joinRemoteRoom(linkRoom);
         return;
+      }
+      const linkSeed = seedFromUrl();
+      if (linkSeed != null) {
+        this.applySeedFromLink(linkSeed);
       }
       this.render();
     } catch (e) {
@@ -410,6 +490,17 @@ class App {
         e instanceof Error ? e.message : String(e)
       }</p></div>`;
     }
+  }
+
+  private applySeedFromLink(seed: number) {
+    this.mode = "anarchy";
+    this.seedInput = String(seed);
+    this.anarchyPreviewSeed = seed;
+    this.seedOpen = true;
+    this.fenOpen = false;
+    this.error = "";
+    this.refreshPreview(false);
+    syncSeedInUrl(seed);
   }
 
   private refreshPreview(animate: boolean) {
@@ -448,6 +539,7 @@ class App {
     this.previewBoard = result.game.board;
     this.previewAnim = true;
     this.error = "";
+    syncSeedInUrl(result.game.seed);
   }
 
   private setGame(game: GameSnapshot) {
@@ -455,6 +547,8 @@ class App {
     this.selected = null;
     this.error = "";
     this.pendingPromo = null;
+    if (game.seed != null && !this.isRemote()) syncSeedInUrl(game.seed);
+    else if (game.seed == null && !this.isRemote()) syncSeedInUrl(null);
   }
 
   private tryResult(
@@ -703,8 +797,8 @@ class App {
             room && st.phase !== "error"
               ? `<div class="lobby-code" aria-label="Room code">${escapeHtml(room)}</div>
                  <div class="lobby-actions">
-                   <button type="button" class="text-btn" data-action="copy-room-link">Copy link</button>
-                   <button type="button" class="text-btn" data-action="copy-room">Copy code</button>
+                   <button type="button" class="text-btn" data-action="copy-room-link">${this.copyLabel("room-link", "Copy link")}</button>
+                   <button type="button" class="text-btn" data-action="copy-room">${this.copyLabel("room", "Copy code")}</button>
                  </div>
                  <p class="lobby-hint">Share the link to auto-join. Host plays White.${
                    this.remoteSetup?.kind === "fen"
@@ -850,22 +944,33 @@ class App {
         <aside class="panel">
           <h2>Game</h2>
           <div class="panel-section">
-            <div class="label">Moves</div>
+            <div class="panel-row">
+              <div class="label">Moves</div>
+              <button type="button" class="text-btn panel-copy" data-action="copy-moves" ${
+                g.moveList ? "" : "disabled"
+              }>${this.copyLabel("moves", "Copy")}</button>
+            </div>
             <div class="move-list">${escapeHtml(g.moveList || "No moves yet.")}</div>
           </div>
           <div class="panel-section">
-            <div class="label">FEN</div>
-            <div class="fen-box">${escapeHtml(g.fen)}</div>
-            <div class="actions">
-              <button type="button" class="action-btn" data-action="copy-fen">Copy FEN</button>
+            <div class="panel-row">
+              <div class="label">FEN</div>
+              <button type="button" class="text-btn panel-copy" data-action="copy-fen">${this.copyLabel("fen", "Copy")}</button>
             </div>
+            <div class="fen-box">${escapeHtml(g.fen)}</div>
           </div>
           ${
             g.seed != null
-              ? `<div class="panel-section"><div class="label">Seed</div><div class="seed-box">${g.seed}</div></div>`
+              ? `<div class="panel-section">
+                   <div class="panel-row">
+                     <div class="label">Seed</div>
+                     <button type="button" class="text-btn panel-copy" data-action="copy-seed">${this.copyLabel("seed", "Copy")}</button>
+                   </div>
+                   <div class="seed-box">${g.seed}</div>
+                 </div>`
               : ""
           }
-          <div class="actions">
+          <div class="panel-actions">
             <button type="button" class="action-btn" data-action="undo" ${
               undoLocked ? "disabled" : ""
             }>Undo</button>
@@ -883,11 +988,12 @@ class App {
               ? `<div class="help">
                   <strong>Help</strong>
                   <ul>
-                    <li>Click a piece, then a highlighted square.</li>
+                    <li>Click a piece, then a highlighted square. Escape clears the selection.</li>
                     <li>Or type notation: e4, Nf3, O-O, exd5, e8=Q.</li>
                     <li>Undo takes back the last half-move (hotseat only).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed as a 7th field.</li>
+                    <li>Anarchy seeds are shareable as <code>?seed=…</code> links.</li>
                     <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer.</li>
                   </ul>
                 </div>`
@@ -979,10 +1085,16 @@ class App {
         if (next === this.mode) return;
         this.mode = next;
         this.error = "";
-        if (next === "classical") this.seedOpen = false;
+        if (next === "classical") {
+          this.seedOpen = false;
+          syncSeedInUrl(null);
+        }
         if (next === "anarchy") this.seedOpen = true;
         this.fenOpen = false;
         this.refreshPreview(true);
+        if (next === "anarchy" && this.anarchyPreviewSeed != null) {
+          syncSeedInUrl(this.anarchyPreviewSeed);
+        }
         this.render();
       });
     });
@@ -998,6 +1110,7 @@ class App {
       const n = Number(trimmed);
       if (!Number.isInteger(n) || n < 0) return;
       this.anarchyPreviewSeed = n;
+      syncSeedInUrl(n);
       this.refreshPreview(true);
       this.patchLandingPreview();
     });
@@ -1024,6 +1137,7 @@ class App {
           this.mode = "anarchy";
           this.refreshPreview(true);
         }
+        if (this.anarchyPreviewSeed != null) syncSeedInUrl(this.anarchyPreviewSeed);
       }
       this.error = "";
       this.render();
@@ -1064,22 +1178,12 @@ class App {
     this.root.querySelector("[data-action='copy-room']")?.addEventListener("click", async () => {
       const room = this.net?.getRoom() || "";
       if (!room) return;
-      try {
-        await navigator.clipboard.writeText(room);
-      } catch {
-        this.error = "Could not copy room code";
-        this.render();
-      }
+      await this.copyText(room, "room", "room code");
     });
     this.root.querySelector("[data-action='copy-room-link']")?.addEventListener("click", async () => {
       const room = this.net?.getRoom() || "";
       if (!room) return;
-      try {
-        await navigator.clipboard.writeText(roomShareUrl(room));
-      } catch {
-        this.error = "Could not copy room link";
-        this.render();
-      }
+      await this.copyText(roomShareUrl(room), "room-link", "room link");
     });
 
     const fen = this.root.querySelector<HTMLTextAreaElement>("#fen");
@@ -1169,12 +1273,15 @@ class App {
     });
     this.root.querySelector("[data-action='copy-fen']")?.addEventListener("click", async () => {
       if (!this.game) return;
-      try {
-        await navigator.clipboard.writeText(this.game.fen);
-      } catch {
-        this.error = "Could not copy FEN";
-        this.render();
-      }
+      await this.copyText(this.game.fen, "fen", "FEN");
+    });
+    this.root.querySelector("[data-action='copy-moves']")?.addEventListener("click", async () => {
+      if (!this.game?.moveList) return;
+      await this.copyText(this.game.moveList, "moves", "moves");
+    });
+    this.root.querySelector("[data-action='copy-seed']")?.addEventListener("click", async () => {
+      if (this.game?.seed == null) return;
+      await this.copyText(String(this.game.seed), "seed", "seed");
     });
     this.root.querySelector("[data-action='cancel-promo']")?.addEventListener("click", () => {
       this.pendingPromo = null;
