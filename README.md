@@ -15,12 +15,12 @@ seeded armies, and **peer-to-peer rooms** you can share with a link.
 
 - **Classical** — standard chess with castling, promotion, en passant, checkmate, and draws
 - **Anarchy** — seeded random armies (kings fixed); same seed → same position; shareable `?seed=…` links
-- **Remote play** — Create Room, share a link or code; guest auto-joins; host is White (undo disabled online)
-- **Board prefs** — optional Last move highlights and Coords (off by default); Escape clears selection / Help
-- **Hotseat** — local two-player on one device; optional Auto-flip (hotseat only) keeps the side to move at the bottom
-- **FEN & Seed** — load positions (optional 7th-field Anarchy seed); copy FEN, moves, or seed from the panel
-- **Notation** — click-to-move or type `e4`, `Nf3`, `O-O`, …
-- **Undo / Resign / Draw / Quit** — offer-and-accept draws; Undo is hotseat only
+- **Remote play** — Create Room, share a link or code; guest auto-joins; host is White; guests rejoin after a drop
+- **Board prefs** — Last move highlights, Coords, and hotseat Auto-flip (all off by default); kings tint when in check
+- **Hotseat** — local two-player on one device; Auto-flip keeps the side to move at the bottom
+- **FEN & Seed** — load positions (optional 7th-field Anarchy seed); one-click copy for FEN, moves, or seed
+- **Notation** — click-to-move or type `e4`, `Nf3`, `O-O`, …; Escape clears selection / Help
+- **Undo / Resign / Draw / Quit** — offer-and-accept draws; Undo is hotseat only (disabled online)
 
 ## Screenshots
 
@@ -35,7 +35,8 @@ open when you need a custom start. Anarchy seeds sync into the URL as `?seed=…
 
 ### Classical
 
-Standard rules, move list, live FEN, and the usual game actions.
+Standard rules, move list, live FEN with copy, optional Last move / Coords /
+Auto-flip, and the usual game actions (Quit returns to the landing screen).
 
 <p>
   <img src="images/classical.png" alt="Classical game in progress after 1. e4 e5 2. Nf3" width="720" />
@@ -55,6 +56,8 @@ Pick or roll a seed; the army layout is reproducible and shown in the panel
 **Create Room** opens a lobby with a code and a shareable link
 (`?room=…`). Guests can paste a code on the landing page or open the link to
 auto-join. Setup (Classical, Anarchy seed, or FEN) is sent with the handshake.
+If a guest disconnects mid-game, the host waits and the guest can rejoin the
+same room.
 
 <p>
   <img src="images/remote-lobby.png" alt="Remote lobby — waiting for opponent with copy link" width="720" />

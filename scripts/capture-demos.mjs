@@ -71,7 +71,7 @@ async function playMoves(page, moves) {
     fullPage: false,
   });
 
-  // 3) Classical mid-opening
+  // 3) Classical mid-opening — show Last move + Coords prefs
   await page.locator('[data-mode="classical"]').click();
   await page.getByRole("button", { name: /^Play$/i }).click();
   await page.waitForSelector(".board");
@@ -81,6 +81,8 @@ async function playMoves(page, moves) {
     ["e7", "e5"],
     ["g1", "f3"],
   ]);
+  await page.getByRole("button", { name: /^Last move$/i }).click();
+  await page.getByRole("button", { name: /^Coords$/i }).click();
   await page.waitForTimeout(350);
   await page.screenshot({
     path: path.join(OUT, "classical.png"),
@@ -88,7 +90,7 @@ async function playMoves(page, moves) {
   });
 
   // 4) Anarchy with fixed seed
-  await page.getByRole("button", { name: /New game/i }).click();
+  await page.getByRole("button", { name: /^Quit$/i }).click();
   await page.waitForSelector(".landing-hero");
   await page.locator('[data-mode="anarchy"]').click();
   await page.waitForSelector("#seed");
@@ -103,7 +105,7 @@ async function playMoves(page, moves) {
   });
 
   // 5) Remote lobby — Create Room waiting + share link
-  await page.getByRole("button", { name: /New game/i }).click();
+  await page.getByRole("button", { name: /^Quit$/i }).click();
   await page.waitForSelector(".landing-hero");
   await page.locator('[data-mode="classical"]').click();
   await page.getByRole("button", { name: /Create Room/i }).click();
