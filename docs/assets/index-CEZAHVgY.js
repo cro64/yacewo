@@ -175,7 +175,7 @@ a=extmap-allow-mixed`)!==-1){const s=i.sdp.split(`
             <button type="button" class="action-btn${s?" draw-accept":""}" data-action="draw" ${d?"disabled":""}>${o}</button>
             <button type="button" class="action-btn" data-action="resign" ${e.isOver||this.isRemote()&&!this.isMyTurn()?"disabled":""}>Resign</button>
             <button type="button" class="action-btn" data-action="help">Help</button>
-            <button type="button" class="action-btn" data-action="new">New game</button>
+            <button type="button" class="action-btn" data-action="new">Quit</button>
           </div>
           ${this.helpOpen?`<div class="help">
                   <strong>Help</strong>

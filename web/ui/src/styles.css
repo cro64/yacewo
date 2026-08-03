@@ -35,6 +35,8 @@ html[data-theme="light"] {
   --moss-deep: #3f6a48;
   --anarchy: #c57b74;
   --danger: #a34840;
+  --accent-undo: #4a7eb5;
+  --accent-draw: #c9a227;
   --board-light: #cfe6c6;
   --board-dark: #7eaf7c;
   --board-selected: #b5d4a4;
@@ -62,6 +64,8 @@ html[data-theme="dark"] {
   --moss-deep: #b4d4b6;
   --anarchy: #e0a29b;
   --danger: #e08b84;
+  --accent-undo: #7aabdb;
+  --accent-draw: #e4c45c;
   --board-light: #b7d4b0;
   --board-dark: #4f7f58;
   --board-selected: #8fbc8a;
@@ -923,8 +927,8 @@ html[data-theme="dark"] .primary-btn {
 }
 
 .action-btn.draw-accept {
-  border-color: color-mix(in srgb, var(--anarchy) 55%, var(--plate-edge));
-  color: var(--anarchy);
+  border-color: color-mix(in srgb, var(--accent-draw) 55%, var(--plate-edge));
+  color: var(--accent-draw);
 }
 
 /* Signature: botanical plate */
@@ -1280,6 +1284,43 @@ html[data-theme="dark"] .primary-btn {
   border-radius: 0.7rem;
   padding: 0.5rem 0.8rem;
   background: color-mix(in srgb, var(--surface) 35%, transparent);
+  transition:
+    border-color 140ms var(--ease),
+    background 140ms var(--ease),
+    color 140ms var(--ease);
+}
+
+.panel-actions .action-btn:hover:not(:disabled) {
+  /* per-action colors below */
+  border-color: var(--moss);
+  background: color-mix(in srgb, var(--moss) 14%, transparent);
+  color: var(--moss-deep);
+}
+
+.panel-actions .action-btn[data-action="undo"]:hover:not(:disabled) {
+  color: var(--accent-undo);
+  border-color: color-mix(in srgb, var(--accent-undo) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent-undo) 14%, transparent);
+}
+
+.panel-actions .action-btn[data-action="draw"]:hover:not(:disabled),
+.panel-actions .action-btn.draw-accept:hover:not(:disabled) {
+  color: var(--accent-draw);
+  border-color: color-mix(in srgb, var(--accent-draw) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent-draw) 16%, transparent);
+}
+
+.panel-actions .action-btn[data-action="resign"]:hover:not(:disabled),
+.panel-actions .action-btn[data-action="new"]:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.panel-actions .action-btn[data-action="help"]:hover:not(:disabled) {
+  color: var(--moss-deep);
+  border-color: color-mix(in srgb, var(--moss) 60%, var(--line));
+  background: color-mix(in srgb, var(--moss) 16%, transparent);
 }
 
 .help {

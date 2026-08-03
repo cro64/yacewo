@@ -981,7 +981,7 @@ class App {
               g.isOver || (this.isRemote() && !this.isMyTurn()) ? "disabled" : ""
             }>Resign</button>
             <button type="button" class="action-btn" data-action="help">Help</button>
-            <button type="button" class="action-btn" data-action="new">New game</button>
+            <button type="button" class="action-btn" data-action="new">Quit</button>
           </div>
           ${
             this.helpOpen
