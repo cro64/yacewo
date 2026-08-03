@@ -1,13 +1,21 @@
 import "./styles.css";
 import {
   loadEngine,
-  unwrap,
+  type Color,
+  type EngineResult,
   type GameSnapshot,
   type LegalMove,
   type Piece,
   type PieceKind,
   type YacewoApi,
 } from "./engine";
+import {
+  NetSession,
+  normalizeRoom,
+  type GameSetup,
+  type NetMsg,
+  type NetStatus,
+} from "./net";
 import {
   applyTheme,
   cycleTheme,
@@ -17,7 +25,8 @@ import {
   type ThemeMode,
 } from "./theme";
 
-type Screen = "landing" | "play";
+type Screen = "landing" | "lobby" | "play";
+type ActionMsg = Exclude<NetMsg, { type: "hello" } | { type: "ready" }>;
 
 const PIECES: Record<string, string> = {
   // Use filled (black-series) glyphs for both colors; paint with CSS.
@@ -120,10 +129,225 @@ class App {
   private previewAnim = false;
 
   private fenOpen = false;
+  private seedOpen = false;
+  private joinOpen = false;
+  private remoteJoinCode = "";
+  private net: NetSession | null = null;
+  private netStatus: NetStatus = { phase: "idle" };
+  /** Set in remote games; null means local hotseat. */
+  private myColor: Color | null = null;
+  private remoteSetup: GameSetup | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
     applyTheme(this.theme);
+  }
+
+  private isRemote(): boolean {
+    return this.myColor != null;
+  }
+
+  private isMyTurn(): boolean {
+    if (!this.game || this.game.isOver) return false;
+    if (!this.myColor) return true;
+    return this.game.turn === this.myColor;
+  }
+
+  private captureSetup(): GameSetup {
+    if (this.mode === "classical") return { kind: "classical" };
+    const trimmed = this.seedInput.trim();
+    if (trimmed === "") {
+      const seed = this.anarchyPreviewSeed;
+      if (seed == null) throw new Error("Pick or roll an Anarchy seed first");
+      return { kind: "anarchy", seed };
+    }
+    const n = Number(trimmed);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error("Seed must be a non-negative integer");
+    }
+    return { kind: "anarchy", seed: n };
+  }
+
+  private applySetup(setup: GameSetup): EngineResult {
+    switch (setup.kind) {
+      case "classical":
+        return this.api.createClassical();
+      case "anarchy":
+        return this.api.createAnarchy(setup.seed);
+      case "fen":
+        return this.api.ofFen(setup.fen);
+    }
+  }
+
+  private ensureNet(): NetSession {
+    if (this.net) return this.net;
+    this.net = new NetSession({
+      onStatus: (status) => {
+        this.netStatus = status;
+        if (status.phase === "connected" && status.role === "host" && this.remoteSetup) {
+          try {
+            this.net?.send({ type: "hello", setup: this.remoteSetup });
+            this.beginRemoteGame(this.remoteSetup, "white");
+          } catch (err) {
+            this.error = err instanceof Error ? err.message : String(err);
+            this.render();
+          }
+          return;
+        }
+        this.render();
+      },
+      onHello: (setup) => {
+        try {
+          this.beginRemoteGame(setup, "black");
+          this.net?.send({ type: "ready" });
+        } catch (err) {
+          this.error = err instanceof Error ? err.message : String(err);
+          this.render();
+        }
+      },
+      onReady: () => {
+        /* host already in play */
+      },
+      onAction: (msg) => this.applyRemoteAction(msg),
+      onDisconnected: () => {
+        const stayedOnPlay = this.screen === "play" && this.game != null;
+        this.error = "Opponent disconnected";
+        this.teardownRemote(true);
+        if (!stayedOnPlay) this.screen = "landing";
+        this.render();
+      },
+    });
+    return this.net;
+  }
+
+  private beginRemoteGame(setup: GameSetup, color: Color) {
+    const result = this.applySetup(setup);
+    if (!result.ok || !result.game) {
+      this.error = result.error ?? "Could not start remote game";
+      this.teardownRemote(true);
+      this.screen = "landing";
+      this.render();
+      return;
+    }
+    this.remoteSetup = setup;
+    this.myColor = color;
+    this.setGame(result.game);
+    this.screen = "play";
+    this.error = "";
+    this.render();
+  }
+
+  private teardownRemote(destroyNet: boolean) {
+    this.myColor = null;
+    this.remoteSetup = null;
+    if (destroyNet) {
+      this.net?.destroy();
+      this.net = null;
+      this.netStatus = { phase: "idle" };
+    }
+  }
+
+  private sendAction(msg: ActionMsg) {
+    if (!this.isRemote() || !this.net) return;
+    try {
+      this.net.send(msg);
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  private tryLocalAction(result: EngineResult, msg: ActionMsg | null) {
+    if (!result.ok || !result.game) {
+      this.error = result.error ?? "Something went wrong";
+      this.render();
+      return;
+    }
+    this.setGame(result.game);
+    this.screen = "play";
+    if (msg) this.sendAction(msg);
+    this.render();
+  }
+
+  private applyRemoteAction(msg: ActionMsg) {
+    if (!this.game) return;
+    let result: EngineResult;
+    switch (msg.type) {
+      case "move":
+        result = this.api.applyMove(msg.from, msg.to, msg.promo);
+        break;
+      case "castle":
+        result = this.api.applyCastle(msg.side);
+        break;
+      case "notation":
+        result = this.api.applyNotation(msg.n);
+        break;
+      case "undo":
+        result = this.api.undo();
+        break;
+      case "resign":
+        result = this.api.resign();
+        break;
+      case "draw":
+        result = this.api.offerDraw();
+        break;
+      default:
+        return;
+    }
+    if (!result.ok || !result.game) {
+      this.error = result.error ?? "Sync error from opponent";
+      this.render();
+      return;
+    }
+    this.setGame(result.game);
+    this.render();
+  }
+
+  private async createRemoteRoom() {
+    this.error = "";
+    this.joinOpen = false;
+    try {
+      const setup = this.captureSetup();
+      this.remoteSetup = setup;
+      this.screen = "lobby";
+      this.render();
+      await this.ensureNet().createRoom();
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err);
+      this.teardownRemote(true);
+      this.screen = "landing";
+      this.render();
+    }
+  }
+
+  private async joinRemoteRoom() {
+    this.error = "";
+    const code = normalizeRoom(this.remoteJoinCode);
+    if (code.length < 4) {
+      this.error = "Enter a valid room code";
+      this.joinOpen = true;
+      this.render();
+      return;
+    }
+    this.screen = "lobby";
+    this.render();
+    try {
+      await this.ensureNet().joinRoom(code);
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err);
+      this.teardownRemote(true);
+      this.screen = "landing";
+      this.joinOpen = true;
+      this.render();
+    }
+  }
+
+  private cancelRemote() {
+    this.teardownRemote(true);
+    this.screen = "landing";
+    this.error = "";
+    this.joinOpen = false;
+    this.refreshPreview(false);
+    this.render();
   }
 
   async boot() {
@@ -214,7 +438,7 @@ class App {
   }
 
   private onSquareClick(alg: string) {
-    if (!this.game || this.game.isOver) return;
+    if (!this.game || this.game.isOver || !this.isMyTurn()) return;
     const idx = this.game.board.findIndex((_, i) => fileRank(i).alg === alg);
     const piece = idx >= 0 ? this.game.board[idx] : null;
 
@@ -249,7 +473,10 @@ class App {
       const kingRank = this.game.turn === "white" ? "1" : "8";
       const dest = c.side === "king" ? `g${kingRank}` : `c${kingRank}`;
       if (to === dest) {
-        this.tryResult(this.api.applyCastle(c.side));
+        this.tryLocalAction(this.api.applyCastle(c.side), {
+          type: "castle",
+          side: c.side,
+        });
         return;
       }
     }
@@ -263,22 +490,29 @@ class App {
     }
 
     const needsPromo = targets.some((m) => m.promotion);
-    if (needsPromo && !targets.every((m) => m.promotion === "queen")) {
-      // show chooser when any promotion variant exists
-    }
     if (needsPromo) {
       this.pendingPromo = { from, to };
       this.render();
       return;
     }
 
-    this.tryResult(this.api.applyMove(from, to, null));
+    this.tryLocalAction(this.api.applyMove(from, to, null), {
+      type: "move",
+      from,
+      to,
+      promo: null,
+    });
   }
 
   private applyPromo(kind: PieceKind) {
     if (!this.pendingPromo) return;
     const { from, to } = this.pendingPromo;
-    this.tryResult(this.api.applyMove(from, to, kind));
+    this.tryLocalAction(this.api.applyMove(from, to, kind), {
+      type: "move",
+      from,
+      to,
+      promo: kind,
+    });
   }
 
   private renderTopbar(showBrandLink: boolean) {
@@ -337,45 +571,108 @@ class App {
         ${this.renderPreviewBoard()}
         <section class="landing-cta">
           <button type="button" class="primary-btn play-btn" data-action="start">Play</button>
-          ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
-        </section>
-        <section class="landing-fen">
-          <button type="button" class="text-btn fen-toggle" data-action="toggle-fen" aria-expanded="${this.fenOpen}">
-            ${this.fenOpen ? "Hide position" : "Load position"}
-          </button>
+          <div class="remote-toggle" role="group" aria-label="Remote play">
+            <button type="button" class="text-btn remote-link" data-action="create-room">Create Room</button>
+            <span class="mode-sep" aria-hidden="true">·</span>
+            <button type="button" class="text-btn remote-link${this.joinOpen ? " active" : ""}" data-action="toggle-join" aria-expanded="${this.joinOpen}">Join Room</button>
+          </div>
+          ${
+            this.joinOpen
+              ? `<div class="remote-join">
+                  <input id="room" maxlength="8" spellcheck="false" autocomplete="off" placeholder="Room code" value="${escapeAttr(this.remoteJoinCode)}" aria-label="Room code" />
+                  <button type="button" class="text-btn" data-action="join-room">Join</button>
+                </div>`
+              : ""
+          }
+          <div class="setup-toggle" role="group" aria-label="Position setup">
+            <button type="button" class="text-btn setup-link${this.fenOpen ? " active" : ""}" data-action="toggle-fen" aria-expanded="${this.fenOpen}">FEN</button>
+            <span class="mode-sep" aria-hidden="true">·</span>
+            <button type="button" class="text-btn setup-link${this.seedOpen ? " active anarchy" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">Seed</button>
+          </div>
           ${
             this.fenOpen
               ? `<div class="fen-panel">
-                  <label class="sr-only" for="fen">FEN</label>
-                  <textarea id="fen" rows="2" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">${escapeHtml(this.fenInput)}</textarea>
+                  <textarea id="fen" rows="2" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" aria-label="FEN">${escapeHtml(this.fenInput)}</textarea>
                   <button type="button" class="text-btn" data-action="load-fen">Load</button>
                 </div>`
               : ""
           }
-        </section>
-        ${
-          this.mode === "anarchy"
-            ? `<section class="landing-seed">
-                <div class="seed-ritual">
-                  <label class="seed-inline" for="seed">Seed</label>
-                  <input id="seed" inputmode="numeric" placeholder="random" value="${escapeAttr(this.seedInput)}" />
+          ${
+            this.seedOpen
+              ? `<div class="seed-ritual">
+                  <input id="seed" inputmode="numeric" placeholder="random" value="${escapeAttr(this.seedInput)}" aria-label="Seed" />
                   <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
                     <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                       <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
                     </svg>
                   </button>
-                </div>
-              </section>`
-            : ""
-        }
+                </div>`
+              : ""
+          }
+          ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
+        </section>
+      </main>
+    `;
+  }
+
+  private renderLobby() {
+    const st = this.netStatus;
+    const room =
+      st.phase === "creating" ||
+      st.phase === "waiting" ||
+      st.phase === "joining" ||
+      st.phase === "connected" ||
+      (st.phase === "error" && st.room)
+        ? st.room ?? ""
+        : "";
+    let headline = "Remote";
+    let detail = "";
+    if (st.phase === "creating") {
+      headline = "Creating room…";
+      detail = room;
+    } else if (st.phase === "waiting") {
+      headline = "Waiting for opponent";
+      detail = room;
+    } else if (st.phase === "joining") {
+      headline = "Connecting…";
+      detail = room;
+    } else if (st.phase === "connected") {
+      headline = "Connected";
+      detail = room;
+    } else if (st.phase === "error") {
+      headline = "Could not connect";
+      detail = st.message;
+    }
+    return `
+      ${this.renderTopbar(true)}
+      <main class="lobby">
+        <div class="lobby-wash" aria-hidden="true"></div>
+        <section class="lobby-card">
+          <p class="lobby-kicker">Remote</p>
+          <h1>${escapeHtml(headline)}</h1>
+          ${
+            room && st.phase !== "error"
+              ? `<div class="lobby-code" aria-label="Room code">${escapeHtml(room)}</div>
+                 <div class="lobby-actions">
+                   <button type="button" class="text-btn" data-action="copy-room">Copy code</button>
+                 </div>
+                 <p class="lobby-hint">Share this code. Host plays White.</p>`
+              : st.phase === "error"
+                ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
+                : ""
+          }
+          ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
+          <button type="button" class="text-btn" data-action="cancel-remote">Cancel</button>
+        </section>
       </main>
     `;
   }
 
   private renderBoard() {
     if (!this.game) return "";
+    const flipped = this.myColor === "black";
     const legalTo = new Set<string>();
-    if (this.selected) {
+    if (this.selected && this.isMyTurn()) {
       for (const m of this.legalTargets(this.selected)) legalTo.add(m.to);
       for (const c of this.castlesFrom(this.selected)) {
         const kingRank = this.game.turn === "white" ? "1" : "8";
@@ -383,8 +680,12 @@ class App {
       }
     }
 
-    const squares = this.game.board
-      .map((piece, i) => {
+    const indices = Array.from({ length: 64 }, (_, i) => i);
+    if (flipped) indices.reverse();
+
+    const squares = indices
+      .map((i) => {
+        const piece = this.game!.board[i] ?? null;
         const { file, rank, alg } = fileRank(i);
         const light = (file + rank) % 2 === 1;
         const classes = [
@@ -405,12 +706,12 @@ class App {
       })
       .join("");
 
-    const ranks = [8, 7, 6, 5, 4, 3, 2, 1]
-      .map((r) => `<span>${r}</span>`)
-      .join("");
-    const files = ["a", "b", "c", "d", "e", "f", "g", "h"]
-      .map((f) => `<span>${f}</span>`)
-      .join("");
+    const rankNums = flipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
+    const fileLetters = flipped
+      ? ["h", "g", "f", "e", "d", "c", "b", "a"]
+      : ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const ranks = rankNums.map((r) => `<span>${r}</span>`).join("");
+    const files = fileLetters.map((f) => `<span>${f}</span>`).join("");
 
     return `
       <div class="board-plate">
@@ -451,6 +752,12 @@ class App {
     const meta = g.seed != null ? "Anarchy" : "Classical";
     const offer = drawOfferText(g);
     const drawLabel = canAcceptDraw(g) ? "Accept draw" : "Draw";
+    const you = this.myColor ? cap(this.myColor) : null;
+    const room =
+      this.netStatus.phase === "connected" || this.netStatus.phase === "waiting"
+        ? this.netStatus.room
+        : this.net?.getRoom() || "";
+    const inputLocked = !this.isMyTurn();
     return `
       ${this.renderTopbar(true)}
       <main class="play">
@@ -460,14 +767,23 @@ class App {
             <span class="${metaClass}">${escapeHtml(meta)}</span>
           </div>
           ${
+            you
+              ? `<div class="remote-banner" role="status">You are ${escapeHtml(you)}${
+                  room ? ` · ${escapeHtml(room)}` : ""
+                }${inputLocked && !g.isOver ? " · waiting" : ""}</div>`
+              : ""
+          }
+          ${
             offer
               ? `<div class="draw-offer" role="status">${escapeHtml(offer)}</div>`
               : ""
           }
           ${this.renderBoard()}
           <form class="algebraic" data-form="notation">
-            <input name="notation" placeholder="e4 · Nf3 · O-O" autocomplete="off" value="${escapeAttr(this.notation)}" ${g.isOver ? "disabled" : ""} />
-            <button class="primary-btn" type="submit" ${g.isOver ? "disabled" : ""}>Move</button>
+            <input name="notation" placeholder="e4 · Nf3 · O-O" autocomplete="off" value="${escapeAttr(this.notation)}" ${
+              g.isOver || inputLocked ? "disabled" : ""
+            } />
+            <button class="primary-btn" type="submit" ${g.isOver || inputLocked ? "disabled" : ""}>Move</button>
           </form>
           <div class="error-line">${escapeHtml(this.error)}</div>
         </section>
@@ -491,8 +807,12 @@ class App {
           }
           <div class="actions">
             <button type="button" class="action-btn" data-action="undo" ${g.isOver ? "disabled" : ""}>Undo</button>
-            <button type="button" class="action-btn${canAcceptDraw(g) ? " draw-accept" : ""}" data-action="draw" ${g.isOver ? "disabled" : ""}>${drawLabel}</button>
-            <button type="button" class="action-btn" data-action="resign" ${g.isOver ? "disabled" : ""}>Resign</button>
+            <button type="button" class="action-btn${canAcceptDraw(g) ? " draw-accept" : ""}" data-action="draw" ${
+              g.isOver || (this.isRemote() && !this.isMyTurn() && !canAcceptDraw(g)) ? "disabled" : ""
+            }>${drawLabel}</button>
+            <button type="button" class="action-btn" data-action="resign" ${
+              g.isOver || (this.isRemote() && !this.isMyTurn()) ? "disabled" : ""
+            }>Resign</button>
             <button type="button" class="action-btn" data-action="help">Help</button>
             <button type="button" class="action-btn" data-action="new">New game</button>
           </div>
@@ -506,6 +826,7 @@ class App {
                     <li>Undo takes back the last half-move.</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
                     <li>FEN can include an optional Anarchy seed as a 7th field.</li>
+                    <li>Remote: Create or Join a room. Host is White; moves sync over peer-to-peer.</li>
                   </ul>
                 </div>`
               : ""
@@ -518,7 +839,11 @@ class App {
 
   render() {
     this.root.innerHTML =
-      this.screen === "landing" ? this.renderLanding() : this.renderPlay();
+      this.screen === "landing"
+        ? this.renderLanding()
+        : this.screen === "lobby"
+          ? this.renderLobby()
+          : this.renderPlay();
     this.bind();
     if (this.screen === "landing" && this.previewAnim) {
       window.setTimeout(() => {
@@ -578,6 +903,7 @@ class App {
 
     this.root.querySelector("[data-nav='landing']")?.addEventListener("click", (e) => {
       e.preventDefault();
+      this.teardownRemote(true);
       this.screen = "landing";
       this.error = "";
       this.refreshPreview(true);
@@ -591,6 +917,9 @@ class App {
         if (next === this.mode) return;
         this.mode = next;
         this.error = "";
+        if (next === "classical") this.seedOpen = false;
+        if (next === "anarchy") this.seedOpen = true;
+        this.fenOpen = false;
         this.refreshPreview(true);
         this.render();
       });
@@ -618,7 +947,67 @@ class App {
 
     this.root.querySelector("[data-action='toggle-fen']")?.addEventListener("click", () => {
       this.fenOpen = !this.fenOpen;
+      if (this.fenOpen) this.seedOpen = false;
       this.render();
+      if (this.fenOpen) {
+        this.root.querySelector<HTMLTextAreaElement>("#fen")?.focus();
+      }
+    });
+
+    this.root.querySelector("[data-action='toggle-seed']")?.addEventListener("click", () => {
+      this.seedOpen = !this.seedOpen;
+      if (this.seedOpen) {
+        this.fenOpen = false;
+        if (this.mode !== "anarchy") {
+          this.mode = "anarchy";
+          this.refreshPreview(true);
+        }
+      }
+      this.error = "";
+      this.render();
+      if (this.seedOpen) {
+        this.root.querySelector<HTMLInputElement>("#seed")?.focus();
+      }
+    });
+
+    this.root.querySelector("[data-action='toggle-join']")?.addEventListener("click", () => {
+      this.joinOpen = !this.joinOpen;
+      this.error = "";
+      this.render();
+      if (this.joinOpen) {
+        this.root.querySelector<HTMLInputElement>("#room")?.focus();
+      }
+    });
+
+    const roomInput = this.root.querySelector<HTMLInputElement>("#room");
+    roomInput?.addEventListener("input", () => {
+      this.remoteJoinCode = roomInput.value.toUpperCase();
+    });
+    roomInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void this.joinRemoteRoom();
+      }
+    });
+
+    this.root.querySelector("[data-action='create-room']")?.addEventListener("click", () => {
+      void this.createRemoteRoom();
+    });
+    this.root.querySelector("[data-action='join-room']")?.addEventListener("click", () => {
+      void this.joinRemoteRoom();
+    });
+    this.root.querySelector("[data-action='cancel-remote']")?.addEventListener("click", () => {
+      this.cancelRemote();
+    });
+    this.root.querySelector("[data-action='copy-room']")?.addEventListener("click", async () => {
+      const room = this.net?.getRoom() || "";
+      if (!room) return;
+      try {
+        await navigator.clipboard.writeText(room);
+      } catch {
+        this.error = "Could not copy room code";
+        this.render();
+      }
     });
 
     const fen = this.root.querySelector<HTMLTextAreaElement>("#fen");
@@ -665,33 +1054,41 @@ class App {
     const form = this.root.querySelector<HTMLFormElement>("[data-form='notation']");
     form?.addEventListener("submit", (e) => {
       e.preventDefault();
+      if (!this.isMyTurn()) return;
       const input = form.elements.namedItem("notation") as HTMLInputElement;
       this.notation = input.value;
-      try {
-        const game = unwrap(this.api.applyNotation(this.notation.trim()));
-        this.setGame(game);
-        this.notation = "";
+      const trimmed = this.notation.trim();
+      const result = this.api.applyNotation(trimmed);
+      if (!result.ok || !result.game) {
+        this.error = result.error ?? "Illegal move";
         this.render();
-      } catch (err) {
-        this.error = err instanceof Error ? err.message : String(err);
-        this.render();
+        return;
       }
+      this.setGame(result.game);
+      this.notation = "";
+      this.sendAction({ type: "notation", n: trimmed });
+      this.render();
     });
 
     this.root.querySelector("[data-action='undo']")?.addEventListener("click", () => {
-      this.tryResult(this.api.undo());
+      this.tryLocalAction(this.api.undo(), { type: "undo" });
     });
     this.root.querySelector("[data-action='resign']")?.addEventListener("click", () => {
-      this.tryResult(this.api.resign());
+      if (this.isRemote() && !this.isMyTurn()) return;
+      this.tryLocalAction(this.api.resign(), { type: "resign" });
     });
     this.root.querySelector("[data-action='draw']")?.addEventListener("click", () => {
-      this.tryResult(this.api.offerDraw());
+      if (this.isRemote() && !this.isMyTurn() && !(this.game && canAcceptDraw(this.game))) {
+        return;
+      }
+      this.tryLocalAction(this.api.offerDraw(), { type: "draw" });
     });
     this.root.querySelector("[data-action='help']")?.addEventListener("click", () => {
       this.helpOpen = !this.helpOpen;
       this.render();
     });
     this.root.querySelector("[data-action='new']")?.addEventListener("click", () => {
+      this.teardownRemote(true);
       this.screen = "landing";
       this.error = "";
       this.helpOpen = false;
