@@ -40,7 +40,7 @@ let instruction extend =
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Undo";
   print_endline " to revert to your previous turn.";
   if extend then (
-    print_endline "     i. You can only undo on your turn.";
+    print_endline "     i. Undo takes back the last half-move.";
     print_endline "     ii. You can undo multiple times.");
   print_string "Enter ";
   ANSITerminal.print_string [ ANSITerminal.yellow ] "Fen";

@@ -2,3 +2,7 @@ _build/
 # bisect
 _coverage
 bisect*.coverage
+web/ui/node_modules/
+web/ui/dist/
+.DS_Store
+frost-glass-backgrounds.json

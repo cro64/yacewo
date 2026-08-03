@@ -377,9 +377,17 @@ let material_tests =
 
 let engine_meta_tests =
   [
-    ( "undo after full round" >:: fun _ ->
+    ( "undo one ply" >:: fun _ ->
       let g = play [ "e4"; "e5" ] in
       assert_equal White (turn g);
+      let g = must_ok (undo g) in
+      assert_equal Black (turn g);
+      assert_equal
+        (Some { kind = Pawn; color = White })
+        (get (board g) (5, 4));
+      assert_equal None (get (board g) (5, 5)) );
+    ( "undo after single move" >:: fun _ ->
+      let g = play [ "e4" ] in
       let g = must_ok (undo g) in
       assert_equal White (turn g);
       assert_equal
@@ -467,7 +475,7 @@ let fen_move_list_tests =
     ( "move list after undo" >:: fun _ ->
       let g = play [ "e4"; "e5"; "Nf3" ] in
       let g = must_ok (undo g) in
-      assert_equal "1. e4" (move_list g) );
+      assert_equal "1. e4 e5" (move_list g) );
     ( "bad fen rejected" >:: fun _ ->
       match of_fen "not a fen" with
       | Error (Fen _) -> ()

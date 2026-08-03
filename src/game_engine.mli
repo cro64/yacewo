@@ -43,7 +43,7 @@ val apply_move : t -> Moves.move -> (t, error) result
 val apply_notation : t -> string -> (t, error) result
 
 val undo : t -> (t, error) result
-(** Undo last full round (both sides), returning to this player's previous turn. *)
+(** Undo the last ply (one half-move). *)
 
 val resign : t -> t
 val offer_draw : t -> t

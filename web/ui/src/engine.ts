@@ -1,0 +1,88 @@
+export type Color = "white" | "black";
+export type PieceKind =
+  | "pawn"
+  | "rook"
+  | "knight"
+  | "bishop"
+  | "queen"
+  | "king";
+
+export interface Piece {
+  kind: PieceKind;
+  color: Color;
+}
+
+export interface Status {
+  tag: string;
+  color: Color | null;
+}
+
+export interface LegalMove {
+  kind: "normal" | "castle";
+  side: string;
+  from: string;
+  to: string;
+  promotion: PieceKind | null;
+}
+
+export interface GameSnapshot {
+  fen: string;
+  moveList: string;
+  turn: Color;
+  status: Status;
+  isOver: boolean;
+  seed: number | null;
+  board: Array<Piece | null>;
+  legalMoves: LegalMove[];
+}
+
+export interface EngineResult {
+  ok: boolean;
+  error: string | null;
+  game: GameSnapshot | null;
+}
+
+export interface YacewoApi {
+  createClassical: () => EngineResult;
+  /** Pass a non-negative seed, or `-1` for a random seed (jsoo requires an arg). */
+  createAnarchy: (seed: number) => EngineResult;
+  ofFen: (fen: string) => EngineResult;
+  applyNotation: (n: string) => EngineResult;
+  applyMove: (
+    from: string,
+    to: string,
+    promo: string | null,
+  ) => EngineResult;
+  applyCastle: (side: string) => EngineResult;
+  undo: () => EngineResult;
+  resign: () => EngineResult;
+  offerDraw: () => EngineResult;
+  getGame: () => GameSnapshot | null;
+}
+
+declare global {
+  interface Window {
+    Yacewo?: YacewoApi;
+  }
+}
+
+export function loadEngine(): Promise<YacewoApi> {
+  if (window.Yacewo) return Promise.resolve(window.Yacewo);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = `${import.meta.env.BASE_URL}yacewo_engine.js`;
+    script.onload = () => {
+      if (window.Yacewo) resolve(window.Yacewo);
+      else reject(new Error("Yacewo engine failed to export"));
+    };
+    script.onerror = () => reject(new Error("Failed to load yacewo_engine.js"));
+    document.head.appendChild(script);
+  });
+}
+
+export function unwrap(result: EngineResult): GameSnapshot {
+  if (!result.ok || !result.game) {
+    throw new Error(result.error ?? "engine error");
+  }
+  return result.game;
+}

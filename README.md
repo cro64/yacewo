@@ -22,3 +22,16 @@ make build
 make test
 make play
 ```
+
+# Web UI (GitHub Pages)
+
+Pastel-sage board UI with light/dark themes. Requires Node.js and
+`js_of_ocaml` (`opam install js_of_ocaml js_of_ocaml-ppx`).
+
+```sh
+make web          # builds engine bridge + static site into docs/
+make web-dev      # local Vite server at /yacewo/
+```
+
+Enable GitHub Pages with source **Deploy from a branch** → `main` / `docs`.
+The site expects the project URL path `/yacewo/`.

@@ -140,14 +140,12 @@ let apply_notation g input =
   | Ok move -> apply_move g move
 
 let undo g =
-  (* Remove the opponent's last ply and this player's previous ply so the
-     same side is to move again (matches original CLI undo). *)
   match g.history with
-  | _opponent :: prev :: rest ->
+  | prev :: rest ->
       let plies =
         match List.rev g.plies with
-        | _ :: _ :: rev -> List.rev rev
-        | _ -> []
+        | _ :: rev -> List.rev rev
+        | [] -> []
       in
       Ok
         {
@@ -159,7 +157,7 @@ let undo g =
           black_draw = false;
           terminal = None;
         }
-  | _ -> Error Undo_unavailable
+  | [] -> Error Undo_unavailable
 
 let resign g =
   if is_over g then g

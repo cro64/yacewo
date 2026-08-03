@@ -1,4 +1,4 @@
-.PHONY: test
+.PHONY: test play build clean utop checkcode bisect bisect-clean doc web web-engine web-dev
 
 play:
 	OCAMLRUNPARAM=b dune exec bin/main.exe
@@ -32,3 +32,14 @@ bisect-clean:
 
 doc:
 	dune build @doc
+
+web-engine:
+	dune build web/bridge/bridge.bc.js
+	mkdir -p web/ui/public
+	cp -f _build/default/web/bridge/bridge.bc.js web/ui/public/yacewo_engine.js
+
+web: web-engine
+	cd web/ui && npm install && npm run build
+
+web-dev: web-engine
+	cd web/ui && npm install && npm run dev
