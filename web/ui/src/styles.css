@@ -34,6 +34,7 @@ html[data-theme="light"] {
   --moss: #6f9b74;
   --moss-deep: #3f6a48;
   --anarchy: #c57b74;
+  --chess960: #6a8f9e;
   --danger: #a34840;
   --accent-undo: #4a7eb5;
   --accent-draw: #c9a227;
@@ -63,6 +64,7 @@ html[data-theme="dark"] {
   --moss: #8fbc93;
   --moss-deep: #b4d4b6;
   --anarchy: #e0a29b;
+  --chess960: #8fb4c0;
   --danger: #e08b84;
   --accent-undo: #7aabdb;
   --accent-draw: #e4c45c;
@@ -306,7 +308,7 @@ a:focus-visible {
 }
 
 .landing-preview .mode-toggle {
-  max-width: var(--landing-menu);
+  max-width: min(22rem, 100%);
 }
 
 .preview-plate {
@@ -318,6 +320,10 @@ a:focus-visible {
 
 .preview-plate.anarchy {
   border-color: color-mix(in srgb, var(--anarchy) 45%, var(--plate-edge));
+}
+
+.preview-plate.chess960 {
+  border-color: color-mix(in srgb, var(--chess960) 45%, var(--plate-edge));
 }
 
 .board.preview-board {
@@ -335,25 +341,15 @@ a:focus-visible {
 }
 
 .mode-toggle {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  column-gap: var(--landing-stack);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: baseline;
+  column-gap: var(--landing-stack);
+  row-gap: 0.2rem;
   width: 100%;
-  max-width: var(--landing-menu);
+  max-width: min(22rem, 100%);
   font-family: var(--font-display);
-}
-
-.mode-toggle [data-mode="classical"] {
-  grid-column: 1;
-  justify-self: end;
-  text-align: right;
-}
-
-.mode-toggle [data-mode="anarchy"] {
-  grid-column: 3;
-  justify-self: start;
-  text-align: left;
 }
 
 .mode-link {
@@ -388,9 +384,13 @@ a:focus-visible {
   border-bottom-color: var(--anarchy);
 }
 
+.mode-link.active.chess960,
+.mode-link.chess960.active {
+  color: var(--chess960);
+  border-bottom-color: var(--chess960);
+}
+
 .mode-sep {
-  grid-column: 2;
-  justify-self: center;
   font-family: var(--font-display);
   color: var(--ink-muted);
   opacity: 0.55;
@@ -431,6 +431,10 @@ a:focus-visible {
   border-bottom-color: var(--anarchy);
 }
 
+.seed-ritual.chess960 input:focus-visible {
+  border-bottom-color: var(--chess960);
+}
+
 .text-btn {
   appearance: none;
   border: none;
@@ -457,6 +461,10 @@ a:focus-visible {
   color: var(--anarchy);
   padding: 0.15rem;
   line-height: 0;
+}
+
+.seed-ritual.chess960 .seed-roll {
+  color: var(--chess960);
 }
 
 .seed-roll-icon {
@@ -537,6 +545,11 @@ a:focus-visible {
 .setup-link.active.anarchy {
   color: var(--anarchy);
   border-bottom-color: var(--anarchy);
+}
+
+.setup-link.active.chess960 {
+  color: var(--chess960);
+  border-bottom-color: var(--chess960);
 }
 
 .seed-ritual input {
@@ -911,6 +924,10 @@ html[data-theme="dark"] .primary-btn {
 
 .status-meta.anarchy {
   color: var(--anarchy);
+}
+
+.status-meta.chess960 {
+  color: var(--chess960);
 }
 
 .draw-offer {
@@ -1300,6 +1317,10 @@ html[data-theme="dark"] .primary-btn {
   border: none;
   max-height: none;
   overflow: visible;
+}
+
+.seed-box.chess960 {
+  color: var(--chess960);
 }
 
 .panel-pref-row {

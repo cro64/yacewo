@@ -76,7 +76,7 @@ val anarchy : seed:int -> t
 (** Anarchy starting position for [seed]. *)
 
 val chess960 : seed:int -> t
-(** Chess960 starting position for [seed]. *)
+(** Chess960 starting position for FIDE ID [seed] (mod 960). *)
 
 val queer_kings : t
 (** Double Kings: RNBKKBNR, both kings are critical. *)

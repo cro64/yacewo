@@ -89,8 +89,9 @@ let print_mode_banner mode game =
     (Printf.sprintf "Mode: %s\n" (mode_label mode));
   (match seed game with
   | Some s ->
+      let label = match mode with `Chess960 -> "ID" | _ -> "Seed" in
       ANSITerminal.print_string [ ANSITerminal.yellow ]
-        (Printf.sprintf "Seed: %d\n" s)
+        (Printf.sprintf "%s: %d\n" label s)
   | None -> ());
   match mode with
   | `Queer `TwoKings ->
@@ -103,7 +104,8 @@ let print_mode_banner mode game =
          to queen or king (kings are ordinary)."
   | `Chess960 ->
       print_endline
-        " Back rank shuffled (FIDE constraints). Castling ends on c/g and d/f."
+        " FIDE Chess960 ID 0–959 (SP-518 = classical). Castling ends on c/g \
+         and d/f."
   | `Anarchy ->
       print_endline " Seeded random armies; kings fixed on e1/e8."
   | `Classical -> ()
@@ -116,7 +118,13 @@ let print_game_summary game =
   let moves = move_list game in
   if moves <> "" then print_endline (" Moves: " ^ moves);
   (match seed game with
-  | Some s -> print_endline (" Seed: " ^ string_of_int s)
+  | Some s ->
+      let label =
+        match (position game).rules.castling with
+        | Chess960 -> "ID"
+        | _ -> "Seed"
+      in
+      print_endline (" " ^ label ^ ": " ^ string_of_int s)
   | None -> ());
   print_endline (" FEN: " ^ to_fen game)
 
@@ -131,6 +139,18 @@ let rec ask_seed label =
       | _ ->
           print_endline " Please enter a non-negative integer, or leave blank.";
           ask_seed label)
+
+let rec ask_chess960_id () =
+  print_string " Enter Chess960 ID 0–959 (blank for random): ";
+  flush stdout;
+  match String.trim (read_line ()) with
+  | "" -> None
+  | s -> (
+      match int_of_string_opt s with
+      | Some n when n >= 0 && n <= 959 -> Some n
+      | _ ->
+          print_endline " Please enter an integer from 0 to 959, or leave blank.";
+          ask_chess960_id ())
 
 let fen_load_note game =
   match seed game with
@@ -247,13 +267,13 @@ let main () =
     | `Classical -> create `Classical
     | `Queer _ as m -> create m
     | (`Anarchy | `Chess960) as m ->
-        let label =
+        let seed =
           match m with
-          | `Anarchy -> "Anarchy"
-          | `Chess960 -> "Chess960"
+          | `Chess960 -> ask_chess960_id ()
+          | `Anarchy -> ask_seed "Anarchy"
           | _ -> assert false
         in
-        create ?seed:(ask_seed label) m
+        create ?seed m
   in
   print_mode_banner mode game;
   instruction false;

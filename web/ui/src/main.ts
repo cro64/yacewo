@@ -141,19 +141,56 @@ function syncRoomInUrl(room: string | null) {
     if (room) {
       params.set("room", room);
       params.delete("seed");
+      params.delete("mode");
     } else {
       params.delete("room");
     }
   });
 }
 
-function syncSeedInUrl(seed: number | null) {
+type SeededMode = "anarchy" | "chess960";
+type GameMode = "classical" | SeededMode;
+
+function isChess960Id(n: number): boolean {
+  return Number.isInteger(n) && n >= 0 && n <= 959;
+}
+
+function parseSeededInput(
+  trimmed: string,
+  mode: SeededMode,
+): { ok: true; seed: number } | { ok: false; error: string } {
+  if (trimmed === "") {
+    return {
+      ok: false,
+      error:
+        mode === "chess960"
+          ? "Pick or roll a Chess960 ID first"
+          : "Pick or roll an Anarchy seed first",
+    };
+  }
+  const n = Number(trimmed);
+  if (mode === "chess960") {
+    if (!isChess960Id(n)) {
+      return { ok: false, error: "Chess960 ID must be an integer from 0 to 959" };
+    }
+    return { ok: true, seed: n };
+  }
+  if (!Number.isInteger(n) || n < 0) {
+    return { ok: false, error: "Seed must be a non-negative integer" };
+  }
+  return { ok: true, seed: n };
+}
+
+function syncSeedInUrl(seed: number | null, mode: SeededMode = "anarchy") {
   replaceSearchParams((params) => {
     if (seed != null) {
       params.set("seed", String(seed));
       params.delete("room");
+      if (mode === "chess960") params.set("mode", "chess960");
+      else params.delete("mode");
     } else {
       params.delete("seed");
+      params.delete("mode");
     }
   });
 }
@@ -170,13 +207,29 @@ function seedFromUrl(): number | null {
   return n;
 }
 
+function seededModeFromUrl(): SeededMode {
+  return new URLSearchParams(location.search).get("mode") === "chess960"
+    ? "chess960"
+    : "anarchy";
+}
+
+function isSeededMode(mode: GameMode): mode is SeededMode {
+  return mode === "anarchy" || mode === "chess960";
+}
+
+function playModeFromSetup(setup: GameSetup): GameMode {
+  if (setup.kind === "fen") return "classical";
+  return setup.kind;
+}
+
 class App {
   private api!: YacewoApi;
   private root: HTMLElement;
   private screen: Screen = "landing";
   private theme: ThemeMode = getStoredTheme();
   private game: GameSnapshot | null = null;
-  private mode: "classical" | "anarchy" = "classical";
+  private mode: GameMode = "classical";
+  private playMode: GameMode = "classical";
   private seedInput = "";
   private fenInput = "";
   private selected: string | null = null;
@@ -186,8 +239,8 @@ class App {
   private notation = "";
   /** Landing hero board (non-interactive). */
   private previewBoard: Array<Piece | null> = [];
-  /** Held Anarchy seed when the input is blank (WYSIWYG with Play). */
-  private anarchyPreviewSeed: number | null = null;
+  /** Held seed when the input is blank (WYSIWYG with Play). */
+  private previewSeed: number | null = null;
   private previewAnim = false;
 
   private fenOpen = false;
@@ -348,19 +401,29 @@ class App {
     }
 
     const trimmed = this.seedInput.trim();
-    const useAnarchy = this.mode === "anarchy" || trimmed !== "";
-    if (!useAnarchy) return { kind: "classical" };
+    if (this.mode === "classical" && trimmed === "") {
+      return { kind: "classical" };
+    }
 
+    const seeded: SeededMode =
+      this.mode === "chess960" ? "chess960" : "anarchy";
     if (trimmed === "") {
-      const seed = this.anarchyPreviewSeed;
-      if (seed == null) throw new Error("Pick or roll an Anarchy seed first");
-      return { kind: "anarchy", seed };
+      const seed = this.previewSeed;
+      if (seed == null) {
+        throw new Error(
+          seeded === "chess960"
+            ? "Pick or roll a Chess960 ID first"
+            : "Pick or roll an Anarchy seed first",
+        );
+      }
+      if (seeded === "chess960" && !isChess960Id(seed)) {
+        throw new Error("Chess960 ID must be an integer from 0 to 959");
+      }
+      return { kind: seeded, seed };
     }
-    const n = Number(trimmed);
-    if (!Number.isInteger(n) || n < 0) {
-      throw new Error("Seed must be a non-negative integer");
-    }
-    return { kind: "anarchy", seed: n };
+    const parsed = parseSeededInput(trimmed, seeded);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return { kind: seeded, seed: parsed.seed };
   }
 
   private applySetup(setup: GameSetup): EngineResult {
@@ -369,9 +432,17 @@ class App {
         return this.api.createClassical();
       case "anarchy":
         return this.api.createAnarchy(setup.seed);
+      case "chess960":
+        return this.api.createChess960(setup.seed);
       case "fen":
         return this.api.ofFen(setup.fen);
     }
+  }
+
+  private createSeeded(seed: number, mode: SeededMode = this.mode === "chess960" ? "chess960" : "anarchy"): EngineResult {
+    return mode === "chess960"
+      ? this.api.createChess960(seed)
+      : this.api.createAnarchy(seed);
   }
 
   private ensureNet(): NetSession {
@@ -460,6 +531,7 @@ class App {
       return;
     }
     this.remoteSetup = setup;
+    this.playMode = playModeFromSetup(setup);
     this.myColor = color;
     this.reconnecting = false;
     this.clearMoveHighlights();
@@ -678,14 +750,21 @@ class App {
   }
 
   private applySeedFromLink(seed: number) {
-    this.mode = "anarchy";
+    const mode = seededModeFromUrl();
+    if (mode === "chess960" && !isChess960Id(seed)) {
+      this.error = "Chess960 ID must be an integer from 0 to 959";
+      this.mode = "chess960";
+      this.seedOpen = true;
+      return;
+    }
+    this.mode = mode;
     this.seedInput = String(seed);
-    this.anarchyPreviewSeed = seed;
+    this.previewSeed = seed;
     this.seedOpen = true;
     this.fenOpen = false;
     this.error = "";
     this.refreshPreview(false);
-    syncSeedInUrl(seed);
+    syncSeedInUrl(seed, mode);
   }
 
   private refreshPreview(animate: boolean) {
@@ -693,38 +772,41 @@ class App {
       this.mode === "classical"
         ? this.api.createClassical()
         : (() => {
+            const seeded: SeededMode = this.mode;
             const trimmed = this.seedInput.trim();
             if (trimmed !== "") {
-              const n = Number(trimmed);
-              if (!Number.isInteger(n) || n < 0) return null;
-              return this.api.createAnarchy(n);
+              const parsed = parseSeededInput(trimmed, seeded);
+              if (!parsed.ok) return null;
+              return this.createSeeded(parsed.seed, seeded);
             }
-            if (this.anarchyPreviewSeed != null) {
-              return this.api.createAnarchy(this.anarchyPreviewSeed);
+            if (this.previewSeed != null) {
+              return this.createSeeded(this.previewSeed, seeded);
             }
-            return this.api.createAnarchy(-1);
+            return this.createSeeded(-1, seeded);
           })();
     if (!result || !result.ok || !result.game) return;
     this.previewBoard = result.game.board;
-    if (this.mode === "anarchy" && result.game.seed != null) {
-      this.anarchyPreviewSeed = result.game.seed;
+    if (isSeededMode(this.mode) && result.game.seed != null) {
+      this.previewSeed = result.game.seed;
     }
     this.previewAnim = animate;
   }
 
-  private rollAnarchySeed() {
-    const result = this.api.createAnarchy(-1);
+  private rollSeed() {
+    const seeded: SeededMode =
+      this.mode === "chess960" ? "chess960" : "anarchy";
+    const result = this.createSeeded(-1, seeded);
     if (!result.ok || !result.game || result.game.seed == null) {
       this.error = result.error ?? "Could not roll seed";
       return;
     }
-    this.mode = "anarchy";
+    this.mode = seeded;
     this.seedInput = String(result.game.seed);
-    this.anarchyPreviewSeed = result.game.seed;
+    this.previewSeed = result.game.seed;
     this.previewBoard = result.game.board;
     this.previewAnim = true;
     this.error = "";
-    syncSeedInUrl(result.game.seed);
+    syncSeedInUrl(result.game.seed, seeded);
   }
 
   private setGame(game: GameSnapshot) {
@@ -732,8 +814,14 @@ class App {
     this.selected = null;
     this.error = "";
     this.pendingPromo = null;
-    if (game.seed != null && !this.isRemote()) syncSeedInUrl(game.seed);
-    else if (game.seed == null && !this.isRemote()) syncSeedInUrl(null);
+    if (game.seed != null && !this.isRemote()) {
+      syncSeedInUrl(
+        game.seed,
+        this.playMode === "chess960" ? "chess960" : "anarchy",
+      );
+    } else if (game.seed == null && !this.isRemote()) {
+      syncSeedInUrl(null);
+    }
   }
 
   private tryResult(
@@ -863,7 +951,12 @@ class App {
 
   private renderPreviewBoard() {
     const anim = this.previewAnim ? " is-settling" : "";
-    const plateMod = this.mode === "anarchy" ? " preview-plate anarchy" : " preview-plate";
+    const plateMod =
+      this.mode === "anarchy"
+        ? " preview-plate anarchy"
+        : this.mode === "chess960"
+          ? " preview-plate chess960"
+          : " preview-plate";
     const squares = this.previewBoard
       .map((piece, i) => {
         const { file, rank } = fileRank(i);
@@ -886,6 +979,8 @@ class App {
           <button type="button" role="tab" class="mode-link${this.mode === "classical" ? " active" : ""}" data-mode="classical" aria-selected="${this.mode === "classical"}">Classical</button>
           <span class="mode-sep" aria-hidden="true">·</span>
           <button type="button" role="tab" class="mode-link${this.mode === "anarchy" ? " active anarchy" : ""}" data-mode="anarchy" aria-selected="${this.mode === "anarchy"}">Anarchy</button>
+          <span class="mode-sep" aria-hidden="true">·</span>
+          <button type="button" role="tab" class="mode-link${this.mode === "chess960" ? " active chess960" : ""}" data-mode="chess960" aria-selected="${this.mode === "chess960"}">Chess960</button>
         </div>
       </div>
     `;
@@ -920,7 +1015,7 @@ class App {
           <div class="setup-toggle" role="group" aria-label="Position setup">
             <button type="button" class="text-btn setup-link${this.fenOpen ? " active" : ""}" data-action="toggle-fen" aria-expanded="${this.fenOpen}">FEN</button>
             <span class="mode-sep" aria-hidden="true">·</span>
-            <button type="button" class="text-btn setup-link${this.seedOpen ? " active anarchy" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">Seed</button>
+            <button type="button" class="text-btn setup-link${this.seedOpen ? ` active ${this.mode === "chess960" ? "chess960" : "anarchy"}` : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">${this.mode === "chess960" ? "ID" : "Seed"}</button>
           </div>
           ${
             this.fenOpen
@@ -932,8 +1027,8 @@ class App {
           }
           ${
             this.seedOpen
-              ? `<div class="seed-ritual">
-                  <input id="seed" inputmode="numeric" placeholder="random" value="${escapeAttr(this.seedInput)}" aria-label="Seed" />
+              ? `<div class="seed-ritual${this.mode === "chess960" ? " chess960" : ""}">
+                  <input id="seed" inputmode="numeric" placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
                   <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
                     <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                       <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
@@ -995,7 +1090,9 @@ class App {
                      ? " Starting from FEN."
                      : this.remoteSetup?.kind === "anarchy"
                        ? ` Anarchy seed ${this.remoteSetup.seed}.`
-                       : ""
+                       : this.remoteSetup?.kind === "chess960"
+                         ? ` Chess960 ID ${this.remoteSetup.seed}.`
+                         : ""
                  }</p>`
               : st.phase === "error"
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
@@ -1092,8 +1189,18 @@ class App {
   private renderPlay() {
     if (!this.game) return this.renderLanding();
     const g = this.game;
-    const metaClass = g.seed != null ? "status-meta anarchy" : "status-meta";
-    const meta = g.seed != null ? "Anarchy" : "Classical";
+    const metaClass =
+      this.playMode === "anarchy"
+        ? "status-meta anarchy"
+        : this.playMode === "chess960"
+          ? "status-meta chess960"
+          : "status-meta";
+    const meta =
+      this.playMode === "anarchy"
+        ? "Anarchy"
+        : this.playMode === "chess960"
+          ? "Chess960"
+          : "Classical";
     const offer = drawOfferText(g);
     const acceptDraw = canAcceptDraw(g, this.myColor);
     const drawLabel = acceptDraw ? "Accept draw" : "Draw";
@@ -1168,10 +1275,10 @@ class App {
             g.seed != null
               ? `<div class="panel-section">
                    <div class="panel-row">
-                     <div class="label">Seed</div>
+                     <div class="label">${this.playMode === "chess960" ? "ID" : "Seed"}</div>
                      <button type="button" class="text-btn panel-copy" data-action="copy-seed">${this.copyLabel("seed", "Copy")}</button>
                    </div>
-                   <div class="seed-box">${g.seed}</div>
+                   <div class="seed-box${this.playMode === "chess960" ? " chess960" : ""}">${g.seed}</div>
                  </div>`
               : ""
           }
@@ -1208,9 +1315,10 @@ class App {
                     <li>Hotseat only: Auto-flip orients the board to the side to move (not available in remote rooms).</li>
                     <li>Last move and Coords can be toggled above the game actions (off by default).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
-                    <li>FEN can include an optional Anarchy seed as a 7th field.</li>
-                    <li>Anarchy seeds are shareable as <code>?seed=…</code> links.</li>
-                    <li>Remote: Set FEN or Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
+                    <li>FEN can include an optional Anarchy seed or Chess960 ID as a 7th field.</li>
+                    <li>Anarchy seeds share as <code>?seed=…</code>; Chess960 FIDE IDs (0–959, SP-518 = classical) as <code>?mode=chess960&amp;seed=…</code>.</li>
+                    <li>Chess960 castling ends on the classical c/g (king) and d/f (rook) squares.</li>
+                    <li>Remote: Set FEN or Seed/ID first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
                   </ul>
                 </div>`
               : ""
@@ -1296,20 +1404,34 @@ class App {
 
     this.root.querySelectorAll("[data-mode]").forEach((el) => {
       el.addEventListener("click", () => {
-        const next =
-          (el as HTMLElement).dataset.mode === "anarchy" ? "anarchy" : "classical";
+        const raw = (el as HTMLElement).dataset.mode;
+        const next: GameMode =
+          raw === "anarchy"
+            ? "anarchy"
+            : raw === "chess960"
+              ? "chess960"
+              : "classical";
         if (next === this.mode) return;
         this.mode = next;
         this.error = "";
         if (next === "classical") {
           this.seedOpen = false;
           syncSeedInUrl(null);
+        } else {
+          this.seedOpen = true;
+          if (
+            next === "chess960" &&
+            this.previewSeed != null &&
+            !isChess960Id(this.previewSeed)
+          ) {
+            this.previewSeed = null;
+            this.seedInput = "";
+          }
         }
-        if (next === "anarchy") this.seedOpen = true;
         this.fenOpen = false;
         this.refreshPreview(true);
-        if (next === "anarchy" && this.anarchyPreviewSeed != null) {
-          syncSeedInUrl(this.anarchyPreviewSeed);
+        if (isSeededMode(next) && this.previewSeed != null) {
+          syncSeedInUrl(this.previewSeed, next);
         }
         this.render();
       });
@@ -1323,16 +1445,19 @@ class App {
         // Keep held preview seed; don't reshuffle while typing blank.
         return;
       }
-      const n = Number(trimmed);
-      if (!Number.isInteger(n) || n < 0) return;
-      this.anarchyPreviewSeed = n;
-      syncSeedInUrl(n);
+      const seeded: SeededMode =
+        this.mode === "chess960" ? "chess960" : "anarchy";
+      const parsed = parseSeededInput(trimmed, seeded);
+      if (!parsed.ok) return;
+      this.previewSeed = parsed.seed;
+      if (!isSeededMode(this.mode)) this.mode = seeded;
+      syncSeedInUrl(parsed.seed, seeded);
       this.refreshPreview(true);
       this.patchLandingPreview();
     });
 
     this.root.querySelector("[data-action='roll-seed']")?.addEventListener("click", () => {
-      this.rollAnarchySeed();
+      this.rollSeed();
       this.render();
     });
 
@@ -1349,11 +1474,16 @@ class App {
       this.seedOpen = !this.seedOpen;
       if (this.seedOpen) {
         this.fenOpen = false;
-        if (this.mode !== "anarchy") {
+        if (!isSeededMode(this.mode)) {
           this.mode = "anarchy";
           this.refreshPreview(true);
         }
-        if (this.anarchyPreviewSeed != null) syncSeedInUrl(this.anarchyPreviewSeed);
+        if (this.previewSeed != null) {
+          syncSeedInUrl(
+            this.previewSeed,
+            this.mode === "chess960" ? "chess960" : "anarchy",
+          );
+        }
       }
       this.error = "";
       this.render();
@@ -1410,27 +1540,38 @@ class App {
     this.root.querySelector("[data-action='start']")?.addEventListener("click", () => {
       this.error = "";
       if (this.mode === "classical") {
+        this.playMode = "classical";
         this.tryResult(this.api.createClassical());
       } else {
+        const seeded: SeededMode = this.mode;
+        this.playMode = seeded;
         const trimmed = this.seedInput.trim();
         if (trimmed === "") {
-          const seed = this.anarchyPreviewSeed ?? -1;
-          this.tryResult(this.api.createAnarchy(seed));
-        } else {
-          const n = Number(trimmed);
-          if (!Number.isInteger(n) || n < 0) {
-            this.error = "Seed must be a non-negative integer";
+          const seed = this.previewSeed ?? -1;
+          if (seeded === "chess960" && seed >= 0 && !isChess960Id(seed)) {
+            this.error = "Chess960 ID must be an integer from 0 to 959";
             this.render();
             return;
           }
-          this.tryResult(this.api.createAnarchy(n));
+          this.tryResult(this.createSeeded(seed, seeded));
+        } else {
+          const parsed = parseSeededInput(trimmed, seeded);
+          if (!parsed.ok) {
+            this.error = parsed.error;
+            this.render();
+            return;
+          }
+          this.tryResult(this.createSeeded(parsed.seed, seeded));
         }
       }
     });
 
     this.root.querySelector("[data-action='load-fen']")?.addEventListener("click", () => {
       this.error = "";
-      this.tryResult(this.api.ofFen(this.fenInput.trim()));
+      const result = this.api.ofFen(this.fenInput.trim());
+      this.playMode =
+        result.ok && result.game?.seed != null ? "anarchy" : "classical";
+      this.tryResult(result);
     });
 
     this.root.querySelectorAll("[data-sq]").forEach((el) => {

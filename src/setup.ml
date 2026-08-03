@@ -15,7 +15,6 @@ let mk kind color = { kind; color }
 type fill =
   | Weighted_anarchy
       (** Current Anarchy weights (never draws [King]). *)
-  | Pawns
   | Empty
 
 type side_constraint =
@@ -94,7 +93,6 @@ let random_kind_anarchy () =
 let fill_square policy =
   match policy with
   | Weighted_anarchy -> random_kind_anarchy ()
-  | Pawns -> Pawn
   | Empty -> failwith "Setup.fill_square: Empty has no kind"
 
 (* ----- bag placement under constraints ----- *)
@@ -262,31 +260,75 @@ let anarchy ~seed =
   Random.init seed;
   generate (Both (anarchy_side_spec White, anarchy_side_spec Black))
 
-let chess960_side_spec =
-  let back = 1 in
-  {
-    region = ranks_region [ back ];
-    fixed = [];
-    bag = [ Rook; Knight; Bishop; Queen; King; Bishop; Knight; Rook ];
-    constraints = [ Bishops_opposite_colors; King_between_rooks ];
-    fill = Empty;
-  }
+(** Normalize to the FIDE / Scharnagl Chess960 range [0, 959]. *)
+let chess960_id id =
+  let id = id mod 960 in
+  if id < 0 then id + 960 else id
 
-let chess960_pawn_spec =
-  {
-    region = ranks_region [ 2 ];
-    fixed = [];
-    bag = [];
-    constraints = [];
-    fill = Pawns;
-  }
+(** White back-rank piece kinds a→h from FIDE Chess960 ID (Scharnagl).
+    SP-518 is the classical [RNBQKBNR]; SP-0 is [BBQNNRKR]. *)
+let chess960_back_kinds id =
+  let id = chess960_id id in
+  let rank = Array.make 8 None in
+  let place file kind = rank.(file) <- Some kind in
+  let empties () =
+    List.filter (fun i -> rank.(i) = None) [ 0; 1; 2; 3; 4; 5; 6; 7 ]
+  in
+  (* Light-squared bishop: b d f h *)
+  let b1 = id mod 4 in
+  let n2 = id / 4 in
+  place ((2 * b1) + 1) Bishop;
+  (* Dark-squared bishop: a c e g *)
+  let b2 = n2 mod 4 in
+  let n3 = n2 / 4 in
+  place (2 * b2) Bishop;
+  (* Queen on the Q-th empty square (a→h) *)
+  let q = n3 mod 6 in
+  let n4 = n3 / 6 in
+  place (List.nth (empties ()) q) Queen;
+  (* Knights on two of the five remaining empties (N5N table) *)
+  let knight_pairs =
+    [|
+      (0, 1);
+      (0, 2);
+      (0, 3);
+      (0, 4);
+      (1, 2);
+      (1, 3);
+      (1, 4);
+      (2, 3);
+      (2, 4);
+      (3, 4);
+    |]
+  in
+  let free = empties () in
+  let i1, i2 = knight_pairs.(n4) in
+  place (List.nth free i1) Knight;
+  place (List.nth free i2) Knight;
+  (* Remaining three: Rook, King, Rook *)
+  (match empties () with
+  | [ a; b; c ] ->
+      place a Rook;
+      place b King;
+      place c Rook
+  | _ -> failwith "Setup.chess960_back_kinds: expected 3 squares");
+  Array.to_list rank
+  |> List.map (function
+       | Some k -> k
+       | None -> failwith "Setup.chess960_back_kinds: hole")
 
 let chess960 ~seed =
-  Random.init seed;
-  let white =
-    generate_side White chess960_side_spec
-    @ generate_side White chess960_pawn_spec
+  let id = chess960_id seed in
+  let kinds = chess960_back_kinds id in
+  let white_back =
+    List.mapi
+      (fun i kind -> ((i + 1, 1), mk kind White))
+      kinds
   in
+  let white_pawns =
+    List.init 8 (fun i -> ((i + 1, 2), mk Pawn White))
+  in
+  let white = white_back @ white_pawns in
   white @ mirror_side white
 
 (** Homonormative-chess layouts: classical with d+e both kings or both queens. *)

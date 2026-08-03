@@ -14,9 +14,12 @@ val anarchy : seed:int -> (square * piece) list
 (** Random non-king pieces on the back two ranks; kings fixed on e1/e8.
     Initializes RNG with [seed]. *)
 
+val chess960_id : int -> int
+(** Map any int into the FIDE Chess960 ID range [0, 959] (Scharnagl). *)
+
 val chess960 : seed:int -> (square * piece) list
-(** Fischer Random: constrained back-rank shuffle, mirrored, classical pawns.
-    Initializes RNG with [seed]. *)
+(** Fischer Random from FIDE / Scharnagl position ID ([seed] mod 960).
+    SP-518 is classical; black mirrors white; classical pawns. *)
 
 val queer_kings : (square * piece) list
 (** Double Kings: [RNBKKBNR] + pawns for both sides. *)

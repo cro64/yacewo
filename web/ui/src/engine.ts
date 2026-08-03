@@ -50,6 +50,7 @@ export interface YacewoApi {
   createClassical: () => EngineResult;
   /** Pass a non-negative seed, or `-1` for a random seed (jsoo requires an arg). */
   createAnarchy: (seed: number) => EngineResult;
+  /** Pass a FIDE Chess960 ID 0–959, or `-1` for a random ID (jsoo requires an arg). */
   createChess960: (seed: number) => EngineResult;
   /** Pass `"kings"` / `"queens"` (or `"dk"` / `"dq"`). */
   createQueer: (variant: string) => EngineResult;

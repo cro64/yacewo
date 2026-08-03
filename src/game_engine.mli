@@ -19,11 +19,13 @@ type t
 (** Opaque game state including history and draw offers. *)
 
 val create : ?seed:int -> mode -> t
-(** New game. For Anarchy and Chess960, [seed] selects the layout; if omitted a
-    random seed is chosen and stored. Classical and Queer ignore [seed]. *)
+(** New game. For Anarchy, [seed] is an arbitrary RNG seed. For Chess960, [seed]
+    is a FIDE / Scharnagl position ID in [0, 959] (out of range values are taken
+    modulo 960); SP-518 is classical. If [seed] is omitted, a random value is
+    chosen and stored. Classical and Queer ignore [seed]. *)
 
 val seed : t -> int option
-(** Layout seed when this game has one (Anarchy / Chess960). *)
+(** Layout seed / Chess960 ID when this game has one. *)
 
 val of_fen : string -> (t, error) result
 (** Start a game from a FEN string (empty move list). Optional seventh FEN

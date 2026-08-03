@@ -6,6 +6,7 @@ const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export type GameSetup =
   | { kind: "classical" }
   | { kind: "anarchy"; seed: number }
+  | { kind: "chess960"; seed: number }
   | { kind: "fen"; fen: string };
 
 export type NetMsg =
@@ -362,6 +363,12 @@ function parseSetup(raw: unknown): GameSetup | null {
   if (s.kind === "classical") return { kind: "classical" };
   if (s.kind === "anarchy" && typeof s.seed === "number" && s.seed >= 0) {
     return { kind: "anarchy", seed: s.seed };
+  }
+  if (s.kind === "chess960" && typeof s.seed === "number") {
+    const id = s.seed;
+    if (Number.isInteger(id) && id >= 0 && id <= 959) {
+      return { kind: "chess960", seed: id };
+    }
   }
   if (s.kind === "fen" && typeof s.fen === "string" && s.fen.trim()) {
     return { kind: "fen", fen: s.fen.trim() };

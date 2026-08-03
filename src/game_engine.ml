@@ -36,6 +36,10 @@ let fresh_seed () =
   Random.self_init ();
   Random.bits ()
 
+let fresh_chess960_id () =
+  Random.self_init ();
+  Random.int 960
+
 let empty_meta seed position =
   {
     position;
@@ -54,8 +58,12 @@ let create ?seed mode =
       let seed = match seed with Some s -> s | None -> fresh_seed () in
       empty_meta (Some seed) (Position.anarchy ~seed)
   | `Chess960 ->
-      let seed = match seed with Some s -> s | None -> fresh_seed () in
-      empty_meta (Some seed) (Position.chess960 ~seed)
+      let id =
+        match seed with
+        | Some s -> Setup.chess960_id s
+        | None -> fresh_chess960_id ()
+      in
+      empty_meta (Some id) (Position.chess960 ~seed:id)
   | `Queer `TwoKings -> empty_meta None Position.queer_kings
   | `Queer `TwoQueens -> empty_meta None Position.queer_queens
 

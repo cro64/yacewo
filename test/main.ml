@@ -107,10 +107,38 @@ let classical_setup_tests =
       let parts = String.split_on_char ' ' fen in
       assert_equal "-" (List.nth parts 2);
       assert_bool "960 tag" (List.mem "960" parts) );
-    ( "chess960 seed stable" >:: fun _ ->
+    ( "chess960 id stable" >:: fun _ ->
       let a = to_fen (create ~seed:99 `Chess960) in
       let b = to_fen (create ~seed:99 `Chess960) in
       assert_equal a b );
+    ( "chess960 sp-518 is classical" >:: fun _ ->
+      let g = create ~seed:518 `Chess960 in
+      assert_equal (Some 518) (seed g);
+      assert_equal
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1 960 518"
+        (to_fen g) );
+    ( "chess960 sp-0 is BBQNNRKR" >:: fun _ ->
+      let g = create ~seed:0 `Chess960 in
+      assert_equal (Some 0) (seed g);
+      assert_equal
+        "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w - - 0 1 960 0"
+        (to_fen g) );
+    ( "chess960 ids are unique" >:: fun _ ->
+      let seen = Hashtbl.create 960 in
+      for id = 0 to 959 do
+        let fen = to_fen (create ~seed:id `Chess960) in
+        let placement = List.hd (String.split_on_char ' ' fen) in
+        if Hashtbl.mem seen placement then
+          assert_failure
+            (Printf.sprintf "duplicate placement for id %d: %s" id placement);
+        Hashtbl.add seen placement id
+      done;
+      assert_equal 960 (Hashtbl.length seen) );
+    ( "chess960 id wraps modulo 960" >:: fun _ ->
+      let a = to_fen (create ~seed:518 `Chess960) in
+      let b = to_fen (create ~seed:(518 + 960) `Chess960) in
+      assert_equal a b;
+      assert_equal (Some 518) (seed (create ~seed:(518 + 960) `Chess960)) );
     ( "queer double kings layout" >:: fun _ ->
       let g = create (`Queer `TwoKings) in
       let b = board g in
