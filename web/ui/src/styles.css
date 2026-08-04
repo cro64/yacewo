@@ -409,6 +409,17 @@ a:focus-visible {
   pointer-events: none;
 }
 
+/*
+ * Soft harmonic float: mostly vertical sine, tiny horizontal sway.
+ * Same ω on both axes → a skinny ellipse (calm “bob”), not a busy Lissajous.
+ * Periods φ-scaled so the two pieces stay out of phase.
+ */
+@property --wash-t {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 .landing-wash::before {
   content: "♜\FE0E";
   /* Flank the centered 42rem menu, not the viewport edges. */
@@ -416,7 +427,11 @@ a:focus-visible {
   top: 26%;
   font-size: clamp(8rem, 28vw, 14rem);
   opacity: 0.38;
-  transform: translateX(-55%) rotate(-18deg);
+  --wash-t: 0;
+  --wash-x: calc(sin(var(--wash-t) * 1turn) * 0.18rem);
+  --wash-y: calc(cos(var(--wash-t) * 1turn) * 0.7rem);
+  transform: translateX(-55%) translate(var(--wash-x), var(--wash-y)) rotate(-18deg);
+  animation: wash-float 9s linear infinite;
 }
 
 .landing-wash::after {
@@ -426,7 +441,28 @@ a:focus-visible {
   top: 8%;
   font-size: clamp(11rem, 36vw, 20rem);
   opacity: 0.4;
-  transform: translateX(-45%) rotate(24deg);
+  --wash-t: 0;
+  /* Opposite phase so they rise/fall on different beats */
+  --wash-x: calc(sin(var(--wash-t) * 1turn + 180deg) * 0.22rem);
+  --wash-y: calc(cos(var(--wash-t) * 1turn + 180deg) * 0.95rem);
+  transform: translateX(-45%) translate(var(--wash-x), var(--wash-y)) rotate(24deg);
+  animation: wash-float 14.56s linear infinite;
+  animation-delay: -3.7s;
+}
+
+@keyframes wash-float {
+  to {
+    --wash-t: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wash::before,
+  .landing-wash::after {
+    animation: none;
+    --wash-x: 0px;
+    --wash-y: 0px;
+  }
 }
 
 /* Full-viewport frost sheet — same layer under menu and topbar. */
