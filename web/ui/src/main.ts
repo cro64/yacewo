@@ -1372,6 +1372,71 @@ class App {
     `;
   }
 
+  /** Mode-aware help: shared controls plus only the active variant’s rules. */
+  private renderHelp(): string {
+    const remote = this.isRemote();
+    const notation =
+      this.playMode === "queer"
+        ? "e4, Nf3, O-O, exd5, e8=Q, e8=K"
+        : "e4, Nf3, O-O, exd5, e8=Q";
+    const items: string[] = [
+      "Click a piece, then a highlighted square. Escape clears the selection or closes Help.",
+      `Or type notation: ${notation}.`,
+      "Last move and Coords can be toggled above the game actions (off by default).",
+      "Draw offers; the other side accepts with Draw or declines by moving.",
+    ];
+    if (remote) {
+      items.push("Host is White; moves sync peer-to-peer. Undo is disabled online.");
+    } else {
+      items.push("Undo takes back the last half-move.");
+      items.push("Auto-flip orients the board to the side to move.");
+    }
+
+    switch (this.playMode) {
+      case "anarchy":
+        items.push(
+          "Random armies with fixed kings; the seed is in the panel and as a seventh FEN field.",
+        );
+        items.push("Share as <code>?seed=…</code>.");
+        break;
+      case "chess960":
+        items.push(
+          "FIDE / Scharnagl IDs <strong>0–959</strong> (SP-518 = classical). Castling ends on c/g (king) and d/f (rook).",
+        );
+        items.push(
+          "The ID is in the panel and as a seventh FEN field (<code>960</code>). Share as <code>?mode=chess960&amp;seed=…</code>.",
+        );
+        break;
+      case "horde":
+        items.push(
+          "White has 36 pawns; rank-1 pawns may double-step. Black wins by capturing every White piece.",
+        );
+        items.push(
+          "FEN ends with <code>horde</code>. Share as <code>?mode=horde</code>.",
+        );
+        break;
+      case "queer":
+        items.push(
+          this.queerVariant === "queens"
+            ? "Double Queens (<code>RNBQQBNR</code>): both queens are critical and must stay safe each turn."
+            : "Double Kings (<code>RNBKKBNR</code>): both kings are critical and must stay safe each turn.",
+        );
+        items.push(
+          "Pawns may promote to king. Share as <code>?mode=dk</code> or <code>?mode=dq</code>.",
+        );
+        break;
+      default:
+        break;
+    }
+
+    return `<div class="help">
+                  <strong>Help</strong>
+                  <ul>
+                    ${items.map((li) => `<li>${li}</li>`).join("\n                    ")}
+                  </ul>
+                </div>`;
+  }
+
   private renderPlay() {
     if (!this.game) return this.renderLanding();
     const g = this.game;
@@ -1498,34 +1563,7 @@ class App {
             <button type="button" class="action-btn" data-action="help">Help</button>
             <button type="button" class="action-btn" data-action="new">Quit</button>
           </div>
-          ${
-            this.helpOpen
-              ? `<div class="help">
-                  <strong>Help</strong>
-                  <ul>
-                    <li>Click a piece, then a highlighted square. Escape clears the selection or closes Help.</li>
-                    <li>Or type notation: e4, Nf3, O-O, exd5, e8=Q.</li>
-                    <li>Undo takes back the last half-move (hotseat only).</li>
-                    <li>Hotseat only: Auto-flip orients the board to the side to move (not available in remote rooms).</li>
-                    <li>Last move and Coords can be toggled above the game actions (off by default).</li>
-                    <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
-                    <li>FEN can include an optional Anarchy seed, Chess960 ID, Horde tag (<code>horde</code>)${
-                      isQueerUnlocked() ? ", or Queer tag (<code>dk</code> / <code>dq</code>)" : ""
-                    }.</li>
-                    <li>Anarchy seeds share as <code>?seed=…</code> (Seed on the landing menu).</li>
-                    <li>Chess960 FIDE IDs (0–959, SP-518 = classical) use ID on the landing menu; share <code>?mode=chess960&amp;seed=…</code>. Out-of-range URL values wrap modulo 960.</li>
-                    <li>Horde: White has 36 pawns (rank-1 may double-step); Black wins by capturing all white pieces. Share as <code>?mode=horde</code>.</li>
-                    ${
-                      isQueerUnlocked()
-                        ? `<li>Queer: Double Kings or Double Queens — every critical piece must stay safe; pawns may promote to king. Share as <code>?mode=dk</code> or <code>?mode=dq</code>.</li>`
-                        : ""
-                    }
-                    <li>Chess960 castling ends on the classical c/g (king) and d/f (rook) squares.</li>
-                    <li>Remote: Set FEN or (in Anarchy) Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
-                  </ul>
-                </div>`
-              : ""
-          }
+          ${this.helpOpen ? this.renderHelp() : ""}
         </aside>
       </main>
       ${this.renderPromo()}
