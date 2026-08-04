@@ -3,10 +3,13 @@ import Peer, { type DataConnection, type PeerError } from "peerjs";
 /** Alphabet without 0/O/1/I to keep room codes easy to read aloud. */
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
+export type QueerVariant = "kings" | "queens";
+
 export type GameSetup =
   | { kind: "classical" }
   | { kind: "anarchy"; seed: number }
   | { kind: "chess960"; seed: number }
+  | { kind: "queer"; variant: QueerVariant }
   | { kind: "fen"; fen: string };
 
 export type NetMsg =
@@ -368,6 +371,19 @@ function parseSetup(raw: unknown): GameSetup | null {
     // Wrap like the engine so a weird handshake value still lands in 0–959.
     const id = ((s.seed % 960) + 960) % 960;
     return { kind: "chess960", seed: id };
+  }
+  if (s.kind === "queer") {
+    if (s.variant === "queens" || s.variant === "dq") {
+      return { kind: "queer", variant: "queens" };
+    }
+    if (
+      s.variant === "kings" ||
+      s.variant === "dk" ||
+      s.variant == null ||
+      s.variant === ""
+    ) {
+      return { kind: "queer", variant: "kings" };
+    }
   }
   if (s.kind === "fen" && typeof s.fen === "string" && s.fen.trim()) {
     return { kind: "fen", fen: s.fen.trim() };

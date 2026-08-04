@@ -15,6 +15,7 @@ import {
   type GameSetup,
   type NetMsg,
   type NetStatus,
+  type QueerVariant,
 } from "./net";
 import {
   applyTheme,
@@ -59,7 +60,24 @@ const PROMO_GLYPH: Record<string, string> = {
   rook: `♜${TEXT}`,
   bishop: `♝${TEXT}`,
   knight: `♞${TEXT}`,
+  king: `♚${TEXT}`,
 };
+
+/** Soft rainbow pastels for Queer-mode legal-move markers. */
+const QUEER_LEGAL_PASTELS = [
+  "#f7a8b8", // rose
+  "#f9c98a", // peach
+  "#f6e27a", // butter
+  "#b8e0a8", // mint
+  "#a8d4f0", // sky
+  "#c5b4f0", // lilac
+  "#f0b8e0", // orchid
+] as const;
+
+function pickQueerLegalColor(): string {
+  const i = Math.floor(Math.random() * QUEER_LEGAL_PASTELS.length);
+  return QUEER_LEGAL_PASTELS[i]!;
+}
 
 function fileRank(i: number): { file: number; rank: number; alg: string } {
   const file = (i % 8) + 1;
@@ -149,7 +167,7 @@ function syncRoomInUrl(room: string | null) {
 }
 
 type SeededMode = "anarchy" | "chess960";
-type GameMode = "classical" | SeededMode;
+type GameMode = "classical" | SeededMode | "queer";
 
 /** Match OCaml [Setup.chess960_id]: any int → [0, 959]. */
 function normalizeChess960Id(n: number): number {
@@ -158,6 +176,17 @@ function normalizeChess960Id(n: number): number {
 
 function isChess960Id(n: number): boolean {
   return Number.isInteger(n) && n >= 0 && n <= 959;
+}
+
+function queerLabel(variant: QueerVariant): string {
+  return variant === "queens" ? "Double Queens" : "Double Kings";
+}
+
+function queerVariantFromFen(fen: string): QueerVariant | null {
+  const parts = fen.trim().split(/\s+/);
+  if (parts.includes("dq")) return "queens";
+  if (parts.includes("dk")) return "kings";
+  return null;
 }
 
 function parseSeededInput(
@@ -200,11 +229,33 @@ function syncSeedInUrl(seed: number | null, mode: SeededMode = "anarchy") {
   });
 }
 
+function syncQueerInUrl(variant: QueerVariant) {
+  replaceSearchParams((params) => {
+    params.delete("room");
+    params.delete("seed");
+    params.set("mode", variant === "queens" ? "dq" : "dk");
+  });
+}
+
 function roomFromUrl(): string {
   return normalizeRoom(new URLSearchParams(location.search).get("room") ?? "");
 }
 
+function queerFromUrl(): QueerVariant | null {
+  const m = new URLSearchParams(location.search).get("mode");
+  if (m === "dq" || m === "queer-queens") return "queens";
+  if (m === "dk" || m === "queer" || m === "queer-kings") return "kings";
+  return null;
+}
+
+/** Queer landing tab: Pride Month, or an explicit queer mode in the URL. */
+function isQueerUnlocked(): boolean {
+  return new Date().getMonth() === 5 || queerFromUrl() != null;
+}
+
 function seedFromUrl(): number | null {
+  // Queer share links use mode=dk|dq and should not open the seed ritual.
+  if (queerFromUrl() != null) return null;
   const raw = new URLSearchParams(location.search).get("seed");
   if (raw == null || raw.trim() === "") return null;
   const n = Number(raw);
@@ -227,6 +278,7 @@ function isSeededMode(mode: GameMode): mode is SeededMode {
 
 function playModeFromSetup(setup: GameSetup): GameMode {
   if (setup.kind === "fen") return "classical";
+  if (setup.kind === "queer") return "queer";
   return setup.kind;
 }
 
@@ -238,9 +290,12 @@ class App {
   private game: GameSnapshot | null = null;
   private mode: GameMode = "classical";
   private playMode: GameMode = "classical";
+  private queerVariant: QueerVariant = "kings";
   private seedInput = "";
   private fenInput = "";
   private selected: string | null = null;
+  /** Queer-mode legal-marker pastel; rerolled each time markers are shown. */
+  private queerLegalColor: string | null = null;
   private error = "";
   private helpOpen = false;
   private pendingPromo: { from: string; to: string } | null = null;
@@ -319,7 +374,7 @@ class App {
       if (!this.pendingPromo && !this.selected && !this.helpOpen) return;
       e.preventDefault();
       this.pendingPromo = null;
-      this.selected = null;
+      this.clearSelection();
       this.helpOpen = false;
       this.render();
     });
@@ -329,17 +384,22 @@ class App {
     return this.myColor != null;
   }
 
-  /** Square of the king in check / checkmate, if any. */
-  private checkKingSquare(): string | null {
-    if (!this.game) return null;
+  /** Squares of critical pieces in check / checkmate. */
+  private checkSquares(): string[] {
+    if (!this.game) return [];
     const tag = this.game.status.tag;
-    if (tag !== "check" && tag !== "checkmate") return null;
+    if (tag !== "check" && tag !== "checkmate") return [];
     const color = this.game.status.color ?? this.game.turn;
+    const kind: PieceKind =
+      this.playMode === "queer" && this.queerVariant === "queens"
+        ? "queen"
+        : "king";
+    const out: string[] = [];
     for (let i = 0; i < 64; i++) {
       const p = this.game.board[i];
-      if (p && p.kind === "king" && p.color === color) return fileRank(i).alg;
+      if (p && p.kind === kind && p.color === color) out.push(fileRank(i).alg);
     }
-    return null;
+    return out;
   }
 
   private boardIsFlipped(): boolean {
@@ -408,6 +468,10 @@ class App {
       return { kind: "fen", fen };
     }
 
+    if (this.mode === "queer") {
+      return { kind: "queer", variant: this.queerVariant };
+    }
+
     const trimmed = this.seedInput.trim();
     if (this.mode === "classical" && trimmed === "") {
       return { kind: "classical" };
@@ -442,6 +506,8 @@ class App {
         return this.api.createAnarchy(setup.seed);
       case "chess960":
         return this.api.createChess960(setup.seed);
+      case "queer":
+        return this.api.createQueer(setup.variant);
       case "fen":
         return this.api.ofFen(setup.fen);
     }
@@ -499,7 +565,7 @@ class App {
       onSync: (msg) => this.applySync(msg),
       onAction: (msg) => this.applyRemoteAction(msg),
       onPeerLeft: () => {
-        this.selected = null;
+        this.clearSelection();
         this.pendingPromo = null;
         if (this.screen === "play" && this.myColor === "white") {
           this.error = "Opponent left — waiting to rejoin";
@@ -540,6 +606,7 @@ class App {
     }
     this.remoteSetup = setup;
     this.playMode = playModeFromSetup(setup);
+    if (setup.kind === "queer") this.queerVariant = setup.variant;
     this.myColor = color;
     this.reconnecting = false;
     this.clearMoveHighlights();
@@ -745,9 +812,14 @@ class App {
         await this.joinRemoteRoom(linkRoom);
         return;
       }
-      const linkSeed = seedFromUrl();
-      if (linkSeed != null) {
-        this.applySeedFromLink(linkSeed);
+      const linkQueer = queerFromUrl();
+      if (linkQueer != null) {
+        this.applyQueerFromLink(linkQueer);
+      } else {
+        const linkSeed = seedFromUrl();
+        if (linkSeed != null) {
+          this.applySeedFromLink(linkSeed);
+        }
       }
       this.render();
     } catch (e) {
@@ -755,6 +827,16 @@ class App {
         e instanceof Error ? e.message : String(e)
       }</p></div>`;
     }
+  }
+
+  private applyQueerFromLink(variant: QueerVariant) {
+    this.mode = "queer";
+    this.queerVariant = variant;
+    this.seedOpen = false;
+    this.fenOpen = false;
+    this.error = "";
+    this.refreshPreview(false);
+    syncQueerInUrl(variant);
   }
 
   private applySeedFromLink(seed: number) {
@@ -775,19 +857,21 @@ class App {
     const result =
       this.mode === "classical"
         ? this.api.createClassical()
-        : (() => {
-            const seeded: SeededMode = this.mode;
-            const trimmed = this.seedInput.trim();
-            if (trimmed !== "") {
-              const parsed = parseSeededInput(trimmed, seeded);
-              if (!parsed.ok) return null;
-              return this.createSeeded(parsed.seed, seeded);
-            }
-            if (this.previewSeed != null) {
-              return this.createSeeded(this.previewSeed, seeded);
-            }
-            return this.createSeeded(-1, seeded);
-          })();
+        : this.mode === "queer"
+          ? this.api.createQueer(this.queerVariant)
+          : (() => {
+              const seeded: SeededMode = this.mode;
+              const trimmed = this.seedInput.trim();
+              if (trimmed !== "") {
+                const parsed = parseSeededInput(trimmed, seeded);
+                if (!parsed.ok) return null;
+                return this.createSeeded(parsed.seed, seeded);
+              }
+              if (this.previewSeed != null) {
+                return this.createSeeded(this.previewSeed, seeded);
+              }
+              return this.createSeeded(-1, seeded);
+            })();
     if (!result || !result.ok || !result.game) return;
     this.previewBoard = result.game.board;
     if (isSeededMode(this.mode) && result.game.seed != null) {
@@ -815,16 +899,20 @@ class App {
 
   private setGame(game: GameSnapshot) {
     this.game = game;
-    this.selected = null;
+    this.clearSelection();
     this.error = "";
     this.pendingPromo = null;
-    if (game.seed != null && !this.isRemote()) {
-      syncSeedInUrl(
-        game.seed,
-        this.playMode === "chess960" ? "chess960" : "anarchy",
-      );
-    } else if (game.seed == null && !this.isRemote()) {
-      syncSeedInUrl(null);
+    if (!this.isRemote()) {
+      if (game.seed != null) {
+        syncSeedInUrl(
+          game.seed,
+          this.playMode === "chess960" ? "chess960" : "anarchy",
+        );
+      } else if (this.playMode === "queer") {
+        syncQueerInUrl(this.queerVariant);
+      } else {
+        syncSeedInUrl(null);
+      }
     }
   }
 
@@ -857,6 +945,18 @@ class App {
     );
   }
 
+  private selectPiece(alg: string) {
+    this.selected = alg;
+    this.error = "";
+    this.queerLegalColor =
+      this.playMode === "queer" ? pickQueerLegalColor() : null;
+  }
+
+  private clearSelection() {
+    this.selected = null;
+    this.queerLegalColor = null;
+  }
+
   private onSquareClick(alg: string) {
     if (!this.game || this.game.isOver || !this.isMyTurn()) return;
     const idx = this.game.board.findIndex((_, i) => fileRank(i).alg === alg);
@@ -864,15 +964,14 @@ class App {
 
     if (!this.selected) {
       if (piece && piece.color === this.game.turn) {
-        this.selected = alg;
-        this.error = "";
+        this.selectPiece(alg);
         this.render();
       }
       return;
     }
 
     if (this.selected === alg) {
-      this.selected = null;
+      this.clearSelection();
       this.render();
       return;
     }
@@ -884,7 +983,7 @@ class App {
         this.attemptMove(this.selected, alg);
         return;
       }
-      this.selected = alg;
+      this.selectPiece(alg);
       this.render();
       return;
     }
@@ -909,7 +1008,7 @@ class App {
     const targets = this.legalTargets(from).filter((m) => m.to === to);
     if (targets.length === 0) {
       this.error = "Illegal move";
-      this.selected = null;
+      this.clearSelection();
       this.render();
       return;
     }
@@ -960,7 +1059,9 @@ class App {
         ? " preview-plate anarchy"
         : this.mode === "chess960"
           ? " preview-plate chess960"
-          : " preview-plate";
+          : this.mode === "queer"
+            ? " preview-plate queer"
+            : " preview-plate";
     const squares = this.previewBoard
       .map((piece, i) => {
         const { file, rank } = fileRank(i);
@@ -985,7 +1086,22 @@ class App {
           <button type="button" role="tab" class="mode-link${this.mode === "anarchy" ? " active anarchy" : ""}" data-mode="anarchy" aria-selected="${this.mode === "anarchy"}">Anarchy</button>
           <span class="mode-sep" aria-hidden="true">·</span>
           <button type="button" role="tab" class="mode-link${this.mode === "chess960" ? " active chess960" : ""}" data-mode="chess960" aria-selected="${this.mode === "chess960"}">Chess960</button>
+          ${
+            isQueerUnlocked()
+              ? `<span class="mode-sep" aria-hidden="true">·</span>
+                 <button type="button" role="tab" class="mode-link${this.mode === "queer" ? " active queer" : ""}" data-mode="queer" aria-selected="${this.mode === "queer"}">Queer</button>`
+              : ""
+          }
         </div>
+        ${
+          isQueerUnlocked() && this.mode === "queer"
+            ? `<div class="queer-variant" role="group" aria-label="Queer variant">
+                 <button type="button" class="text-btn queer-link${this.queerVariant === "kings" ? " active" : ""}" data-queer="kings">Kings</button>
+                 <span class="mode-sep" aria-hidden="true">·</span>
+                 <button type="button" class="text-btn queer-link${this.queerVariant === "queens" ? " active" : ""}" data-queer="queens">Queens</button>
+               </div>`
+            : ""
+        }
       </div>
     `;
   }
@@ -1016,10 +1132,17 @@ class App {
                 </div>`
               : ""
           }
-          <div class="setup-toggle" role="group" aria-label="Position setup">
+          <div class="setup-toggle${isSeededMode(this.mode) ? "" : " fen-only"}" role="group" aria-label="Position setup">
             <button type="button" class="text-btn setup-link${this.fenOpen ? " active" : ""}" data-action="toggle-fen" aria-expanded="${this.fenOpen}">FEN</button>
-            <span class="mode-sep" aria-hidden="true">·</span>
-            <button type="button" class="text-btn setup-link${this.seedOpen ? ` active ${this.mode === "chess960" ? "chess960" : "anarchy"}` : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">${this.mode === "chess960" ? "ID" : "Seed"}</button>
+            ${
+              this.mode === "anarchy"
+                ? `<span class="mode-sep" aria-hidden="true">·</span>
+                   <button type="button" class="text-btn setup-link${this.seedOpen ? " active anarchy" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">Seed</button>`
+                : this.mode === "chess960"
+                  ? `<span class="mode-sep" aria-hidden="true">·</span>
+                     <button type="button" class="text-btn setup-link${this.seedOpen ? " active chess960" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">ID</button>`
+                  : ""
+            }
           </div>
           ${
             this.fenOpen
@@ -1030,7 +1153,7 @@ class App {
               : ""
           }
           ${
-            this.seedOpen
+            isSeededMode(this.mode) && this.seedOpen
               ? `<div class="seed-ritual${this.mode === "chess960" ? " chess960" : ""}">
                   <input id="seed" inputmode="numeric" ${this.mode === "chess960" ? 'min="0" max="959" maxlength="3" ' : ""}placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
                   <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
@@ -1096,7 +1219,9 @@ class App {
                        ? ` Anarchy seed ${this.remoteSetup.seed}.`
                        : this.remoteSetup?.kind === "chess960"
                          ? ` Chess960 ID ${this.remoteSetup.seed}.`
-                         : ""
+                         : this.remoteSetup?.kind === "queer"
+                           ? ` ${queerLabel(this.remoteSetup.variant)}.`
+                           : ""
                  }</p>`
               : st.phase === "error"
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
@@ -1112,7 +1237,7 @@ class App {
   private renderBoard() {
     if (!this.game) return "";
     const flipped = this.boardIsFlipped();
-    const checkSq = this.checkKingSquare();
+    const checkSet = new Set(this.checkSquares());
     const last = this.currentLastMove();
     const legalTo = new Set<string>();
     if (this.selected && this.isMyTurn()) {
@@ -1131,19 +1256,29 @@ class App {
         const piece = this.game!.board[i] ?? null;
         const { file, rank, alg } = fileRank(i);
         const light = (file + rank) % 2 === 1;
+        const isLegal = legalTo.has(alg);
+        const isLastFrom = !!last && last.from === alg;
+        const isLastTo = !!last && last.to === alg;
+        const queerBoard = this.playMode === "queer";
         const classes = [
           "sq",
           light ? "light" : "dark",
           this.selected === alg ? "selected" : "",
-          checkSq === alg ? "check" : "",
-          last && (last.from === alg || last.to === alg) ? "last-move" : "",
-          legalTo.has(alg) ? "legal" : "",
+          checkSet.has(alg) ? "check" : "",
+          isLastFrom || isLastTo ? "last-move" : "",
+          queerBoard && isLastFrom ? "last-from" : "",
+          queerBoard && isLastTo ? "last-to" : "",
+          isLegal ? "legal" : "",
           piece ? "has-piece" : "",
         ]
           .filter(Boolean)
           .join(" ");
         const glyph = pieceGlyph(piece);
-        return `<button type="button" class="${classes}" data-sq="${alg}" aria-label="${alg}" style="--wave-col:${file - 1}">${
+        const styleParts = [`--wave-col:${file - 1}`];
+        if (isLegal && this.queerLegalColor) {
+          styleParts.push(`--legal:${this.queerLegalColor}`);
+        }
+        return `<button type="button" class="${classes}" data-sq="${alg}" aria-label="${alg}" style="${styleParts.join(";")}">${
           glyph
             ? `<span class="piece ${piece?.color ?? ""}">${glyph}</span>`
             : ""
@@ -1158,12 +1293,13 @@ class App {
     const ranks = rankNums.map((r) => `<span>${r}</span>`).join("");
     const files = fileLetters.map((f) => `<span>${f}</span>`).join("");
     const stageClass = this.showCoords ? "board-stage" : "board-stage no-coords";
+    const queer = this.playMode === "queer";
 
     return `
-      <div class="board-plate">
+      <div class="board-plate${queer ? " queer" : ""}">
         <div class="${stageClass}">
           ${this.showCoords ? `<div class="rank-gutter" aria-hidden="true">${ranks}</div>` : ""}
-          <div class="board" role="grid" aria-label="Chess board">${squares}</div>
+          <div class="board${queer ? " queer-board" : ""}" role="grid" aria-label="Chess board">${squares}</div>
           ${this.showCoords ? `<div></div><div class="file-gutter" aria-hidden="true">${files}</div>` : ""}
         </div>
       </div>
@@ -1172,15 +1308,19 @@ class App {
 
   private renderPromo() {
     if (!this.pendingPromo) return "";
+    const queer = this.playMode === "queer";
+    const kinds: PieceKind[] = queer
+      ? ["queen", "rook", "bishop", "knight", "king"]
+      : ["queen", "rook", "bishop", "knight"];
     return `
       <div class="promo" role="dialog" aria-label="Choose promotion">
-        <div class="promo-card">
+        <div class="promo-card${queer ? " queer" : ""}">
           <strong>Promote pawn</strong>
           <div class="promo-row">
-            ${(["queen", "rook", "bishop", "knight"] as PieceKind[])
+            ${kinds
               .map(
                 (k) =>
-                  `<button type="button" data-promo="${k}" aria-label="${k}">${PROMO_GLYPH[k]}</button>`,
+                  `<button type="button" data-promo="${k}" class="${k === "king" ? "promo-royal" : ""}" aria-label="${k}">${PROMO_GLYPH[k]}</button>`,
               )
               .join("")}
           </div>
@@ -1198,13 +1338,17 @@ class App {
         ? "status-meta anarchy"
         : this.playMode === "chess960"
           ? "status-meta chess960"
-          : "status-meta";
+          : this.playMode === "queer"
+            ? "status-meta queer"
+            : "status-meta";
     const meta =
       this.playMode === "anarchy"
         ? "Anarchy"
         : this.playMode === "chess960"
           ? "Chess960"
-          : "Classical";
+          : this.playMode === "queer"
+            ? queerLabel(this.queerVariant)
+            : "Classical";
     const offer = drawOfferText(g);
     const acceptDraw = canAcceptDraw(g, this.myColor);
     const drawLabel = acceptDraw ? "Accept draw" : "Draw";
@@ -1319,10 +1463,18 @@ class App {
                     <li>Hotseat only: Auto-flip orients the board to the side to move (not available in remote rooms).</li>
                     <li>Last move and Coords can be toggled above the game actions (off by default).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
-                    <li>FEN can include an optional Anarchy seed or Chess960 ID as a 7th field.</li>
-                    <li>Anarchy seeds share as <code>?seed=…</code>; Chess960 FIDE IDs (0–959, SP-518 = classical) as <code>?mode=chess960&amp;seed=…</code>. Out-of-range Chess960 URL values wrap modulo 960.</li>
+                    <li>FEN can include an optional Anarchy seed, Chess960 ID${
+                      isQueerUnlocked() ? ", or Queer tag (<code>dk</code> / <code>dq</code>)" : ""
+                    }.</li>
+                    <li>Anarchy seeds share as <code>?seed=…</code> (Seed on the landing menu).</li>
+                    <li>Chess960 FIDE IDs (0–959, SP-518 = classical) use ID on the landing menu; share <code>?mode=chess960&amp;seed=…</code>. Out-of-range URL values wrap modulo 960.</li>
+                    ${
+                      isQueerUnlocked()
+                        ? `<li>Queer: Double Kings or Double Queens — every critical piece must stay safe; pawns may promote to king. Share as <code>?mode=dk</code> or <code>?mode=dq</code>.</li>`
+                        : ""
+                    }
                     <li>Chess960 castling ends on the classical c/g (king) and d/f (rook) squares.</li>
-                    <li>Remote: Set FEN or Seed/ID first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
+                    <li>Remote: Set FEN or (in Anarchy) Seed first if you want a custom start, then Create Room and share the link. Host is White; moves sync over peer-to-peer. Undo is disabled online.</li>
                   </ul>
                 </div>`
               : ""
@@ -1414,14 +1566,15 @@ class App {
             ? "anarchy"
             : raw === "chess960"
               ? "chess960"
-              : "classical";
+              : raw === "queer"
+                ? "queer"
+                : "classical";
+        if (next === "queer" && !isQueerUnlocked()) return;
         if (next === this.mode) return;
         this.mode = next;
         this.error = "";
-        if (next === "classical") {
-          this.seedOpen = false;
-          syncSeedInUrl(null);
-        } else {
+        this.fenOpen = false;
+        if (isSeededMode(next)) {
           this.seedOpen = true;
           if (
             next === "chess960" &&
@@ -1431,12 +1584,34 @@ class App {
             this.previewSeed = null;
             this.seedInput = "";
           }
+        } else {
+          this.seedOpen = false;
         }
-        this.fenOpen = false;
+        if (next === "classical") {
+          syncSeedInUrl(null);
+        } else if (next === "queer") {
+          syncQueerInUrl(this.queerVariant);
+        }
         this.refreshPreview(true);
         if (isSeededMode(next) && this.previewSeed != null) {
           syncSeedInUrl(this.previewSeed, next);
         }
+        this.render();
+      });
+    });
+
+    this.root.querySelectorAll("[data-queer]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const raw = (el as HTMLElement).dataset.queer;
+        const next: QueerVariant = raw === "queens" ? "queens" : "kings";
+        if (this.mode !== "queer") this.mode = "queer";
+        if (next === this.queerVariant) return;
+        this.queerVariant = next;
+        this.seedOpen = false;
+        this.fenOpen = false;
+        this.error = "";
+        syncQueerInUrl(next);
+        this.refreshPreview(true);
         this.render();
       });
     });
@@ -1456,7 +1631,6 @@ class App {
         this.mode === "chess960" ? "chess960" : "anarchy";
       const parsed = parseSeededInput(trimmed, seeded);
       if (!parsed.ok) {
-        // Strict 0–959 in the control; do not preview or write URL.
         if (seeded === "chess960") {
           this.error = parsed.error;
           let err = this.root.querySelector(".landing-cta .error-line");
@@ -1476,7 +1650,7 @@ class App {
       this.error = "";
       const err = this.root.querySelector(".landing-cta .error-line");
       if (err) err.textContent = "";
-      if (!isSeededMode(this.mode)) this.mode = seeded;
+      this.mode = seeded;
       syncSeedInUrl(parsed.seed, seeded);
       this.refreshPreview(true);
       this.patchLandingPreview();
@@ -1504,11 +1678,8 @@ class App {
           this.mode = "anarchy";
           this.refreshPreview(true);
         }
-        if (this.previewSeed != null) {
-          syncSeedInUrl(
-            this.previewSeed,
-            this.mode === "chess960" ? "chess960" : "anarchy",
-          );
+        if (this.previewSeed != null && isSeededMode(this.mode)) {
+          syncSeedInUrl(this.previewSeed, this.mode);
         }
       }
       this.error = "";
@@ -1568,6 +1739,9 @@ class App {
       if (this.mode === "classical") {
         this.playMode = "classical";
         this.tryResult(this.api.createClassical());
+      } else if (this.mode === "queer") {
+        this.playMode = "queer";
+        this.tryResult(this.api.createQueer(this.queerVariant));
       } else {
         const seeded: SeededMode = this.mode;
         this.playMode = seeded;
@@ -1594,9 +1768,17 @@ class App {
 
     this.root.querySelector("[data-action='load-fen']")?.addEventListener("click", () => {
       this.error = "";
-      const result = this.api.ofFen(this.fenInput.trim());
-      this.playMode =
-        result.ok && result.game?.seed != null ? "anarchy" : "classical";
+      const fen = this.fenInput.trim();
+      const result = this.api.ofFen(fen);
+      const queer = queerVariantFromFen(fen);
+      if (queer) {
+        this.playMode = "queer";
+        this.queerVariant = queer;
+      } else if (result.ok && result.game?.seed != null) {
+        this.playMode = fen.includes("960") ? "chess960" : "anarchy";
+      } else {
+        this.playMode = "classical";
+      }
       this.tryResult(result);
     });
 
@@ -1682,7 +1864,7 @@ class App {
     });
     this.root.querySelector("[data-action='cancel-promo']")?.addEventListener("click", () => {
       this.pendingPromo = null;
-      this.selected = null;
+      this.clearSelection();
       this.render();
     });
     this.root.querySelectorAll("[data-promo]").forEach((el) => {

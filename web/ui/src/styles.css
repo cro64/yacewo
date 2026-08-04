@@ -35,6 +35,8 @@ html[data-theme="light"] {
   --moss-deep: #3f6a48;
   --anarchy: #c57b74;
   --chess960: #6a8f9e;
+  --queer: #9a6b8c;
+  --queer-pastel: #e8a8b8, #e8c8a0, #d8d8a8, #b0d8b8, #a8c8e0, #c0b0e0, #e8a8b8;
   --danger: #a34840;
   --accent-undo: #4a7eb5;
   --accent-draw: #c9a227;
@@ -65,6 +67,8 @@ html[data-theme="dark"] {
   --moss-deep: #b4d4b6;
   --anarchy: #e0a29b;
   --chess960: #8fb4c0;
+  --queer: #c9a0b8;
+  --queer-pastel: #f0b8c4, #f0d4b0, #e4e4b8, #c0e0c4, #b8d4e8, #d0c0e4, #f0b8c4;
   --danger: #e08b84;
   --accent-undo: #7aabdb;
   --accent-draw: #e4c45c;
@@ -308,7 +312,7 @@ a:focus-visible {
 }
 
 .landing-preview .mode-toggle {
-  max-width: min(22rem, 100%);
+  max-width: min(28rem, 100%);
 }
 
 .preview-plate {
@@ -324,6 +328,29 @@ a:focus-visible {
 
 .preview-plate.chess960 {
   border-color: color-mix(in srgb, var(--chess960) 45%, var(--plate-edge));
+}
+
+.preview-plate.queer,
+.board-plate.queer {
+  border-color: color-mix(in srgb, var(--queer) 45%, var(--plate-edge));
+}
+
+@keyframes queer-border-drift {
+  0% {
+    background-position: 0% 50%, 0% 50%;
+  }
+  100% {
+    background-position: 0% 50%, 100% 50%;
+  }
+}
+
+@keyframes queer-pastel-drift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
 }
 
 .board.preview-board {
@@ -348,7 +375,7 @@ a:focus-visible {
   column-gap: var(--landing-stack);
   row-gap: 0.2rem;
   width: 100%;
-  max-width: min(22rem, 100%);
+  max-width: min(28rem, 100%);
   font-family: var(--font-display);
 }
 
@@ -390,6 +417,33 @@ a:focus-visible {
   border-bottom-color: var(--chess960);
 }
 
+.mode-link.active.queer,
+.mode-link.queer.active {
+  border-bottom-color: transparent;
+  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: queer-pastel-drift 16s linear infinite;
+  position: relative;
+}
+
+.mode-link.active.queer::after,
+.mode-link.queer.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-size: 200% 100%;
+  opacity: 0.75;
+  animation: queer-pastel-drift 16s linear infinite;
+}
+
 .mode-sep {
   font-family: var(--font-display);
   color: var(--ink-muted);
@@ -397,6 +451,48 @@ a:focus-visible {
   font-size: 1.25rem;
   line-height: 1;
   font-weight: 500;
+}
+
+.queer-variant {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  column-gap: var(--landing-stack);
+  width: 100%;
+  max-width: var(--landing-menu);
+}
+
+.queer-link {
+  font-size: var(--label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.queer-link.active {
+  border-bottom-color: transparent;
+  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: queer-pastel-drift 18s linear infinite;
+  position: relative;
+}
+
+.queer-link.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-size: 200% 100%;
+  opacity: 0.7;
+  animation: queer-pastel-drift 18s linear infinite;
 }
 
 .seed-ritual {
@@ -519,6 +615,16 @@ a:focus-visible {
   grid-column: 1;
   justify-self: end;
   text-align: right;
+}
+
+.setup-toggle.fen-only {
+  grid-template-columns: 1fr;
+}
+
+.setup-toggle.fen-only [data-action="toggle-fen"] {
+  grid-column: 1;
+  justify-self: center;
+  text-align: center;
 }
 
 .remote-toggle [data-action="toggle-join"],
@@ -930,6 +1036,18 @@ html[data-theme="dark"] .primary-btn {
   color: var(--chess960);
 }
 
+.status-meta.queer {
+  border-bottom: none;
+  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: queer-pastel-drift 18s linear infinite;
+  letter-spacing: 0.06em;
+}
+
 .draw-offer {
   width: calc(var(--board-size) + 2 * var(--plate-pad) + 2px + 1.75rem);
   max-width: 100%;
@@ -1102,13 +1220,62 @@ html[data-theme="dark"] .primary-btn {
     inset 0 0 0 4px color-mix(in srgb, var(--danger) 70%, transparent);
 }
 
+/* ——— Queer board: soft pastels, quiet motion ——— */
+
+.board.queer-board .sq.last-from {
+  background: color-mix(in srgb, #e8b4c0 32%, var(--board-light)) !important;
+}
+
+.board.queer-board .sq.dark.last-from {
+  background: color-mix(in srgb, #e8b4c0 26%, var(--board-dark)) !important;
+}
+
+.board.queer-board .sq.last-to {
+  background: color-mix(in srgb, #b4cfe0 34%, var(--board-light)) !important;
+}
+
+.board.queer-board .sq.dark.last-to {
+  background: color-mix(in srgb, #b4cfe0 28%, var(--board-dark)) !important;
+}
+
+.board.queer-board .sq.check {
+  background: color-mix(in srgb, #c8b0dc 26%, var(--board-light)) !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #e8a8b8 55%, transparent);
+  animation: queer-check-breathe 5.5s ease-in-out infinite;
+}
+
+.board.queer-board .sq.dark.check {
+  background: color-mix(in srgb, #c8b0dc 22%, var(--board-dark)) !important;
+}
+
+.board.queer-board .sq.check.selected {
+  box-shadow:
+    inset 0 0 0 2px var(--moss-deep),
+    inset 0 0 0 4px color-mix(in srgb, #c8b0dc 65%, transparent);
+  animation: none;
+}
+
+@keyframes queer-check-breathe {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, #e8a8b8 45%, transparent);
+  }
+  50% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, #a8c8e0 55%, transparent);
+  }
+}
+
+.board.queer-board .sq.selected {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #c0b0e0 80%, var(--queer));
+}
+
 .sq.legal::after {
   content: "";
   position: absolute;
   width: 22%;
   height: 22%;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--board-legal) 85%, var(--ink));
+  background: color-mix(in srgb, var(--legal, var(--board-legal)) 85%, var(--ink));
   opacity: 0.85;
   pointer-events: none;
 }
@@ -1117,9 +1284,42 @@ html[data-theme="dark"] .primary-btn {
   width: 72%;
   height: 72%;
   background: transparent;
-  border: 2.5px solid color-mix(in srgb, var(--board-legal) 90%, var(--ink));
+  border: 2.5px solid color-mix(in srgb, var(--legal, var(--board-legal)) 90%, var(--ink));
   opacity: 0.95;
   border-radius: 2px;
+}
+
+.board.queer-board .sq.legal::after,
+.board.queer-board .sq.legal.has-piece::after {
+  animation: queer-legal-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes queer-legal-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-link.active.queer,
+  .mode-link.queer.active,
+  .mode-link.active.queer::after,
+  .mode-link.queer.active::after,
+  .queer-link.active,
+  .queer-link.active::after,
+  .status-meta.queer,
+  .promo-card.queer,
+  .board.queer-board .sq.check,
+  .board.queer-board .sq.legal::after,
+  .board.queer-board .sq.legal.has-piece::after {
+    animation: none !important;
+  }
 }
 
 .piece {
@@ -1431,6 +1631,15 @@ html[data-theme="dark"] .primary-btn {
   box-shadow: 0 18px 40px color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
+.promo-card.queer {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--glass-strong), var(--glass-strong)) padding-box,
+    linear-gradient(120deg, var(--queer-pastel)) border-box;
+  background-size: 100% 100%, 220% 220%;
+  animation: queer-border-drift 24s linear infinite;
+}
+
 .promo-card strong {
   font-family: var(--font-display);
   font-size: 1.35rem;
@@ -1455,6 +1664,18 @@ html[data-theme="dark"] .primary-btn {
   font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2",
     "DejaVu Sans", var(--font-display), serif;
   text-shadow: 0 1px 1px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.promo-row button.promo-royal {
+  border-color: transparent;
+  background:
+    linear-gradient(
+      color-mix(in srgb, #c0b0e0 14%, var(--surface)),
+      color-mix(in srgb, #e8c8a0 10%, var(--surface))
+    )
+    padding-box,
+    linear-gradient(120deg, var(--queer-pastel)) border-box;
+  border: 1px solid transparent;
 }
 
 .loading,
