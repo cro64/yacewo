@@ -4,43 +4,64 @@
 
 [Play online →](https://cro64.github.io/yacewo/)
 
-Two-player chess in the browser or terminal — **Classical** openings, **Anarchy**
-seeded armies, **Chess960**, **Horde**, and **shareable rooms** backed by a
-Cloudflare Durable Object (either player can refresh and rejoin).
+Two-player chess in the browser or the terminal. Classical, Anarchy,
+Chess960, Horde. Share a room, or paste a FEN and pick up where you left off.
+
+## Tour
+
+### Landing preview + Classical play
 
 <p align="center">
-  <img src="images/demo.gif" alt="YACEWO play demo" width="720" />
+  <img src="images/demo.gif" alt="YACEWO landing mode preview animation and Classical playthrough" width="720" />
 </p>
 
-## Features
+### Light & dark
 
-- **Classical** — standard chess with castling, promotion, en passant, checkmate, and draws
-- **Anarchy** — seeded random armies (kings fixed); same seed → same position; shareable `?seed=…` links
-- **Chess960** — FIDE / Scharnagl IDs **0–959** (SP-518 = classical); share as `?mode=chess960&seed=…`
-- **Horde** — Lichess-style: White has 36 pawns (rank-1 may double-step); Black wins by wiping the horde; share as `?mode=horde`
-- **Remote play** — Create Room, share a link or code; either player can rejoin after a drop; you can still move on your turn while the opponent is away
-- **Board prefs** — Last move highlights, Coords, and hotseat Auto-flip (all off by default); critical pieces tint when in check
-- **Hotseat** — local two-player on one device; Auto-flip keeps the side to move at the bottom
-- **FEN & Seed** — load positions (optional 7th-field seed / `960` / `horde` / `dk` / `dq`); one-click copy for FEN, moves, or seed/ID
-- **Notation** — click-to-move or type `e4`, `Nf3`, `O-O`, …; Escape clears selection / Help
-- **Undo / Resign / Draw / Quit** — offer-and-accept draws; Undo is hotseat only (disabled online)
-
-## Screenshots
-
-### Landing
-
-Classical, Anarchy, Chess960, or Horde, then Play — or create / join a remote
-room. FEN and Seed/ID open when you need a custom start. Anarchy seeds sync as
-`?seed=…`; Chess960 as `?mode=chess960&seed=…`; Horde as `?mode=horde`.
-
-<p>
-  <img src="images/landing.png" alt="YACEWO landing — Classical, Anarchy, Chess960, or Horde; Create or Join Room" width="720" />
+<p align="center">
+  <img src="images/theme-light.png" alt="Classical game in light theme" width="48%" />
+  &nbsp;
+  <img src="images/theme-dark.png" alt="Classical game in dark theme" width="48%" />
 </p>
+
+### Made for phones
+
+<p align="center">
+  <img src="images/mobile-portrait.png" alt="YACEWO landing on iPhone portrait" width="32%" />
+  &nbsp;
+  <img src="images/mobile-play.png" alt="Classical game on iPhone portrait" width="32%" />
+  &nbsp;
+  <img src="images/mobile-rotate.gif" alt="Rotate-to-portrait gate with animated phone" width="32%" />
+</p>
+
+### Pick up any position
+
+<p align="center">
+  <img src="images/fen-panel.png" alt="Landing FEN panel with a mid-game position pasted" width="48%" />
+  &nbsp;
+  <img src="images/fen-load.png" alt="Board restored from the pasted FEN" width="48%" />
+</p>
+
+### Play someone remotely
+
+<p align="center">
+  <img src="images/multiplayer.gif" alt="Create room, opponent joins, and a few plies of remote play" width="720" />
+</p>
+
+## What you get
+
+- Hotseat on one phone, or a room you can share
+- Classical, Anarchy, Chess960, Horde
+- One-tap copy for FEN, moves, seed/ID
+- Last-move glow, coords, auto-flip. All optional.
+- Click pieces or type `e4`, `Nf3`, `O-O`
+- Light / dark, sound on / off, portrait-first on phones
+
+## Ways to play
 
 ### Classical
 
-Standard rules, move list, live FEN with copy, optional Last move / Coords /
-Auto-flip, and the usual game actions (Quit returns to the landing screen).
+The normal game. Castling, en passant, promotion, mates and draws. Live move
+list. FEN you can copy whenever.
 
 <p>
   <img src="images/classical.png" alt="Classical game in progress after 1. e4 e5 2. Nf3" width="720" />
@@ -48,8 +69,8 @@ Auto-flip, and the usual game actions (Quit returns to the landing screen).
 
 ### Anarchy
 
-Pick or roll a seed; the army layout is reproducible and shown in the panel
-(and in FEN as a seventh field). Open `/yacewo/?seed=42` to land on that army.
+Random armies. Kings stay put. Pick a seed (or roll one). Same seed =
+same chaos, so you can text it to a friend and open the identical mess.
 
 <p>
   <img src="images/anarchy.png" alt="Anarchy mode with seed 42" width="720" />
@@ -57,10 +78,8 @@ Pick or roll a seed; the army layout is reproducible and shown in the panel
 
 ### Chess960
 
-Uses the FIDE / Scharnagl numbering (**0–959**). SP-518 is the classical
-starting array. Castling follows Chess960 (king ends on c/g, rook on d/f).
-Open `/yacewo/?mode=chess960&seed=518` for the familiar layout. Out-of-range
-URL values wrap modulo 960; the ID field itself only accepts 0–959.
+Fischer Random with the usual FIDE IDs (0 to 959). Pick a number, share it.
+Castling still works the Chess960 way.
 
 <p>
   <img src="images/chess960.png" alt="Chess960 position with FIDE ID 518" width="720" />
@@ -68,49 +87,39 @@ URL values wrap modulo 960; the ID field itself only accepts 0–959.
 
 ### Horde
 
-White fields 36 pawns; Black keeps a normal army. Rank-1 White pawns may
-double-step. Black wins by capturing every White piece (not only the king).
-Open `/yacewo/?mode=horde`.
+Thirty-six White pawns. One normal Black army. Survive the wave, or eat every
+last pawn.
 
 <p>
-  <img src="images/horde.png" alt="Horde — White's 36-pawn army vs Black" width="720" />
+  <img src="images/horde.png" alt="Horde: White's 36-pawn army vs Black" width="720" />
 </p>
 
 ### Remote rooms
 
-**Create Room** opens a lobby with a code and a shareable link
-(`?room=…`). Guests paste the code or open the link to join. Host is White;
-guest is Black. Setup (Classical, Anarchy seed, Chess960 ID, Horde, Queer, or
-FEN) is sent with the handshake.
+One person creates. The other joins. Host is White, guest is Black. Play in
+any game mode.
 
-Rooms are **not** peer-to-peer: state lives in a [Cloudflare Durable
-Object](yacewo-worker/) (`yacewo-rooms`). Either player can refresh or drop and
-rejoin with the same link — a per-browser identity token keeps host/guest
-roles stable. The side to move can still play while the opponent is away; the
-DO stores moves and syncs them on rejoin. Idle sockets hibernate (no duration
-while thinking). Finished games expire after **15 minutes**, unfinished rooms
-after **24 hours** of inactivity.
+You can still move if they step away. Reconnect anytime in 24 hours.
 
 <p>
-  <img src="images/remote-lobby.png" alt="Remote lobby — waiting for opponent with copy link" width="720" />
+  <img src="images/remote-lobby.png" alt="Remote lobby waiting for opponent with copy link" width="720" />
   &nbsp;
   <img src="images/remote-join.png" alt="Join Room with a six-character code" width="720" />
 </p>
 
-## Easter Egg
+<p>
+  <img src="images/landing.png" alt="YACEWO landing: pick a mode, Play, or Create / Join Room" width="720" />
+</p>
+
+## Easter egg
 
 ### Queer
 
-Hidden on the landing menu except during Pride Month (June) — or whenever you
-open the share link. Double Kings (`RNBKKBNR`) or Double Queens (`RNBQQBNR`):
-every critical piece must stay safe each turn; pawns may promote to king.
-Open `/yacewo/?mode=dk` or `/yacewo/?mode=dq`.
-
 <p>
-  <img src="images/queer.png" alt="Queer Double Kings — pastel board and legal markers" width="720" />
+  <img src="images/queer.png" alt="Queer Double Kings with pastel board and legal markers" width="720" />
 </p>
 
-## Web UI
+## Run it yourself
 
 Live site: **[https://cro64.github.io/yacewo/](https://cro64.github.io/yacewo/)**
 
@@ -121,9 +130,11 @@ make web-dev      # local Vite at http://localhost:5173/yacewo/
 
 Requires Node.js and `opam install js_of_ocaml js_of_ocaml-ppx`.
 
-### Remote rooms setup
+### Remote rooms (deploy)
 
-1. **Deploy the Worker** (once per Cloudflare account) — see
+Finished games die after 15 minutes. Idle unfinished rooms after 24 hours.
+
+1. **Deploy the Worker** (once per Cloudflare account). See
    [yacewo-worker/README.md](yacewo-worker/README.md):
 
    ```sh
@@ -140,7 +151,7 @@ Requires Node.js and `opam install js_of_ocaml js_of_ocaml-ppx`.
 2. **Point the UI at it** before building (Vite bakes the URL in at build time):
 
    ```sh
-   # web/ui/.env.local — gitignored
+   # web/ui/.env.local (gitignored)
    VITE_YACEWO_ROOMS_URL=https://yacewo-rooms.<subdomain>.workers.dev
    ```
 
@@ -148,17 +159,17 @@ Requires Node.js and `opam install js_of_ocaml js_of_ocaml-ppx`.
 
    ```sh
    make web-dev   # local UI → live Worker; test join in an incognito window
-   make web       # writes docs/ for GitHub Pages — then commit & push docs/
+   make web       # writes docs/ for GitHub Pages; then commit & push docs/
    ```
 
-   Two players need **separate browser profiles** (or incognito): the same
-   profile reuses the room identity token and cannot open two seats.
+   Two players need separate browser profiles (or incognito). Same profile
+   reuses the room identity token and can't open two seats.
 
-Regenerate README screenshots / demo (with `make web-dev` or `vite preview` running):
+Regenerate README screenshots / demos (with `make web-dev` running):
 
 ```sh
-# optional: YACEWO_URL=https://cro64.github.io/yacewo/
-node scripts/capture-demos.mjs   # needs playwright + ffmpeg
+YACEWO_URL=http://localhost:5173/yacewo/ node scripts/capture-demos.mjs
+# needs playwright + ffmpeg
 ```
 
 ## Terminal
@@ -173,6 +184,7 @@ See [INSTALL.md](INSTALL.md) for OCaml and web setup.
 
 ## Credits
 
-Main Engine started as CS3110 @ Cornell final-project. Heavily modified since.
+Main engine started as a CS3110 @ Cornell final project. Heavily modified
+since.
 
 Queer mode inspired by [homonormative-chess](https://github.com/SwiftWinds/homonormative-chess) 💅
