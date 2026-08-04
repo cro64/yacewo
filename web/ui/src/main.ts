@@ -86,7 +86,7 @@ function fileRank(i: number): { file: number; rank: number; alg: string } {
   return { file, rank, alg };
 }
 
-function statusText(game: GameSnapshot): string {
+function statusText(game: GameSnapshot, mode?: GameMode): string {
   const st = game.status;
   switch (st.tag) {
     case "in_progress":
@@ -94,6 +94,9 @@ function statusText(game: GameSnapshot): string {
     case "check":
       return `${cap(st.color ?? game.turn)} in check — ${cap(game.turn)} to move`;
     case "checkmate":
+      if (mode === "horde" && st.color === "white") {
+        return "Black wins — horde destroyed";
+      }
       return `${cap(st.color === "white" ? "black" : "white")} wins by checkmate`;
     case "stalemate":
       return "Draw by stalemate";
@@ -1094,7 +1097,9 @@ class App {
           ? " preview-plate chess960"
           : this.mode === "queer"
             ? " preview-plate queer"
-            : " preview-plate";
+            : this.mode === "horde"
+              ? " preview-plate horde"
+              : " preview-plate";
     const squares = this.previewBoard
       .map((piece, i) => {
         const { file, rank } = fileRank(i);
@@ -1120,7 +1125,7 @@ class App {
           <span class="mode-sep" aria-hidden="true">·</span>
           <button type="button" role="tab" class="mode-link${this.mode === "chess960" ? " active chess960" : ""}" data-mode="chess960" aria-selected="${this.mode === "chess960"}">Chess960</button>
           <span class="mode-sep" aria-hidden="true">·</span>
-          <button type="button" role="tab" class="mode-link${this.mode === "horde" ? " active" : ""}" data-mode="horde" aria-selected="${this.mode === "horde"}">Horde</button>
+          <button type="button" role="tab" class="mode-link${this.mode === "horde" ? " active horde" : ""}" data-mode="horde" aria-selected="${this.mode === "horde"}">Horde</button>
           ${
             isQueerUnlocked()
               ? `<span class="mode-sep" aria-hidden="true">·</span>
@@ -1377,7 +1382,9 @@ class App {
           ? "status-meta chess960"
           : this.playMode === "queer"
             ? "status-meta queer"
-            : "status-meta";
+            : this.playMode === "horde"
+              ? "status-meta horde"
+              : "status-meta";
     const meta =
       this.playMode === "anarchy"
         ? "Anarchy"
@@ -1416,7 +1423,7 @@ class App {
       <main class="play">
         <section class="board-wrap">
           <div class="status">
-            <span class="status-turn">${escapeHtml(statusText(g))}</span>
+            <span class="status-turn">${escapeHtml(statusText(g, this.playMode))}</span>
             <span class="${metaClass}">${escapeHtml(meta)}</span>
           </div>
           ${
@@ -1502,11 +1509,12 @@ class App {
                     <li>Hotseat only: Auto-flip orients the board to the side to move (not available in remote rooms).</li>
                     <li>Last move and Coords can be toggled above the game actions (off by default).</li>
                     <li>Draw offers; the other side accepts with Draw or declines by moving.</li>
-                    <li>FEN can include an optional Anarchy seed, Chess960 ID${
+                    <li>FEN can include an optional Anarchy seed, Chess960 ID, Horde tag (<code>horde</code>)${
                       isQueerUnlocked() ? ", or Queer tag (<code>dk</code> / <code>dq</code>)" : ""
                     }.</li>
                     <li>Anarchy seeds share as <code>?seed=…</code> (Seed on the landing menu).</li>
                     <li>Chess960 FIDE IDs (0–959, SP-518 = classical) use ID on the landing menu; share <code>?mode=chess960&amp;seed=…</code>. Out-of-range URL values wrap modulo 960.</li>
+                    <li>Horde: White has 36 pawns (rank-1 may double-step); Black wins by capturing all white pieces. Share as <code>?mode=horde</code>.</li>
                     ${
                       isQueerUnlocked()
                         ? `<li>Queer: Double Kings or Double Queens — every critical piece must stay safe; pawns may promote to king. Share as <code>?mode=dk</code> or <code>?mode=dq</code>.</li>`

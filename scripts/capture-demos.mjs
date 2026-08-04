@@ -29,8 +29,8 @@ async function forceLight(page) {
   });
 }
 
-async function gotoFresh(page) {
-  await page.goto(BASE, { waitUntil: "networkidle" });
+async function gotoFresh(page, url = BASE) {
+  await page.goto(url, { waitUntil: "networkidle" });
   await forceLight(page);
   await page.reload({ waitUntil: "networkidle" });
   await waitEngine(page);
@@ -45,6 +45,12 @@ async function playMoves(page, moves) {
   }
 }
 
+function withQuery(query) {
+  const u = new URL(BASE);
+  for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v);
+  return u.toString();
+}
+
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
@@ -54,7 +60,7 @@ async function playMoves(page, moves) {
   });
   const page = await context.newPage();
 
-  // 1) Landing — Classical / Anarchy + remote actions
+  // 1) Landing — Classical / Anarchy / Chess960 / Horde + remote actions
   await gotoFresh(page);
   await page.screenshot({
     path: path.join(OUT, "landing.png"),
@@ -104,7 +110,52 @@ async function playMoves(page, moves) {
     fullPage: false,
   });
 
-  // 5) Remote lobby — Create Room waiting + share link
+  // 5) Chess960 — classical SP-518 via URL
+  await page.getByRole("button", { name: /^Quit$/i }).click();
+  await page.waitForSelector(".landing-hero");
+  await gotoFresh(page, withQuery({ mode: "chess960", seed: "518" }));
+  await page.getByRole("button", { name: /^Play$/i }).click();
+  await page.waitForSelector(".board");
+  await page.waitForTimeout(500);
+  await page.screenshot({
+    path: path.join(OUT, "chess960.png"),
+    fullPage: false,
+  });
+
+  // 6) Horde
+  await page.getByRole("button", { name: /^Quit$/i }).click();
+  await page.waitForSelector(".landing-hero");
+  await page.locator('[data-mode="horde"]').click();
+  await page.waitForTimeout(250);
+  await page.getByRole("button", { name: /^Play$/i }).click();
+  await page.waitForSelector(".board");
+  await page.waitForTimeout(500);
+  await page.screenshot({
+    path: path.join(OUT, "horde.png"),
+    fullPage: false,
+  });
+
+  // 7) Queer easter egg — unlock via share link; show pastel legal markers
+  await page.getByRole("button", { name: /^Quit$/i }).click();
+  await page.waitForSelector(".landing-hero");
+  await gotoFresh(page, withQuery({ mode: "dk" }));
+  await page.getByRole("button", { name: /^Play$/i }).click();
+  await page.waitForSelector(".board");
+  await page.waitForTimeout(400);
+  await playMoves(page, [
+    ["e2", "e4"],
+    ["e7", "e5"],
+  ]);
+  await page.getByRole("button", { name: /^Last move$/i }).click();
+  await page.locator('[data-sq="g1"]').click();
+  await page.waitForTimeout(450);
+  await page.screenshot({
+    path: path.join(OUT, "queer.png"),
+    fullPage: false,
+  });
+  await page.keyboard.press("Escape");
+
+  // 8) Remote lobby — Create Room waiting + share link
   await page.getByRole("button", { name: /^Quit$/i }).click();
   await page.waitForSelector(".landing-hero");
   await page.locator('[data-mode="classical"]').click();
@@ -118,7 +169,7 @@ async function playMoves(page, moves) {
   await page.getByRole("button", { name: /Cancel/i }).click();
   await page.waitForSelector(".landing-hero");
 
-  // 6) Short demo: landing → play opening
+  // 9) Short demo: landing → Horde peek → Classical opening
   const videoContext = await browser.newContext({
     viewport: { width: 1100, height: 780 },
     deviceScaleFactor: 1,
@@ -127,6 +178,10 @@ async function playMoves(page, moves) {
   const vpage = await videoContext.newPage();
   await gotoFresh(vpage);
   await vpage.waitForTimeout(500);
+  await vpage.locator('[data-mode="horde"]').click();
+  await vpage.waitForTimeout(700);
+  await vpage.locator('[data-mode="classical"]').click();
+  await vpage.waitForTimeout(400);
   await vpage.getByRole("button", { name: /^Play$/i }).click();
   await vpage.waitForSelector(".board");
   await vpage.waitForTimeout(400);
@@ -166,6 +221,9 @@ async function playMoves(page, moves) {
     "landing.png",
     "classical.png",
     "anarchy.png",
+    "chess960.png",
+    "horde.png",
+    "queer.png",
     "remote-join.png",
     "remote-lobby.png",
     "demo.webm",

@@ -37,6 +37,7 @@ html[data-theme="light"] {
   --chess960: #6a8f9e;
   --queer: #9a6b8c;
   --queer-pastel: #e8a8b8, #e8c8a0, #d8d8a8, #b0d8b8, #a8c8e0, #c0b0e0, #e8a8b8;
+  --horde: #b8893d;
   --danger: #a34840;
   --accent-undo: #4a7eb5;
   --accent-draw: #c9a227;
@@ -69,6 +70,7 @@ html[data-theme="dark"] {
   --chess960: #8fb4c0;
   --queer: #c9a0b8;
   --queer-pastel: #f0b8c4, #f0d4b0, #e4e4b8, #c0e0c4, #b8d4e8, #d0c0e4, #f0b8c4;
+  --horde: #e0bc6a;
   --danger: #e08b84;
   --accent-undo: #7aabdb;
   --accent-draw: #e4c45c;
@@ -330,6 +332,10 @@ a:focus-visible {
   border-color: color-mix(in srgb, var(--chess960) 45%, var(--plate-edge));
 }
 
+.preview-plate.horde {
+  border-color: color-mix(in srgb, var(--horde) 45%, var(--plate-edge));
+}
+
 .preview-plate.queer,
 .board-plate.queer {
   border-color: color-mix(in srgb, var(--queer) 45%, var(--plate-edge));
@@ -415,6 +421,12 @@ a:focus-visible {
 .mode-link.chess960.active {
   color: var(--chess960);
   border-bottom-color: var(--chess960);
+}
+
+.mode-link.active.horde,
+.mode-link.horde.active {
+  color: var(--horde);
+  border-bottom-color: var(--horde);
 }
 
 .mode-link.active.queer,
@@ -1034,6 +1046,10 @@ html[data-theme="dark"] .primary-btn {
 
 .status-meta.chess960 {
   color: var(--chess960);
+}
+
+.status-meta.horde {
+  color: var(--horde);
 }
 
 .status-meta.queer {
