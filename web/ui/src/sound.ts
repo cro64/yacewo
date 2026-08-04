@@ -20,6 +20,7 @@ export type Sfx =
   | "resign"
   | "offer"
   | "ui"
+  | "mode"
   | "start"
   | "copy"
   | "connect"
@@ -313,6 +314,15 @@ export function play(sfx: Sfx) {
       break;
     case "ui":
       wood(c, { duration: 0.02, gain: 0.022, freq: 1400, q: 1.8 });
+      break;
+    case "mode":
+      wood(c, { duration: 0.028, gain: 0.038, freq: 980, q: 1.3 });
+      tone(c, {
+        freq: 520,
+        duration: 0.07,
+        type: "triangle",
+        gain: 0.028,
+      });
       break;
     case "start":
       tone(c, { freq: 330, duration: 0.14, type: "sine", gain: 0.04 });

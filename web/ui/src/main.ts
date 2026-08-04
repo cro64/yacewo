@@ -1797,7 +1797,7 @@ class App {
         if (isSeededMode(next) && this.previewSeed != null) {
           syncSeedInUrl(this.previewSeed, next);
         }
-        play(next === "queer" ? "queer" : "ui");
+        play(next === "queer" ? "queer" : "mode");
         this.render();
       });
     });
