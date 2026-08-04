@@ -18,6 +18,8 @@
   --text-btn-size: 0.82rem;
   --text-btn-pad: 0.25rem 0;
   --label-size: 0.72rem;
+  /* Touch floor for interactive chrome (scaled at ≤1024) */
+  --touch-min: 44px;
 }
 
 html[data-theme="light"] {
@@ -36,7 +38,9 @@ html[data-theme="light"] {
   --anarchy: #c57b74;
   --chess960: #6a8f9e;
   --queer: #9a6b8c;
+  /* Soft stops for underlines / borders; deeper ink stops so clipped text reads on mint. */
   --queer-pastel: #e8a8b8, #e8c8a0, #d8d8a8, #b0d8b8, #a8c8e0, #c0b0e0, #e8a8b8;
+  --queer-pastel-ink: #c06a88, #c08850, #9a9a48, #508a60, #5088b0, #8870b0, #c06a88;
   --horde: #b8893d;
   --danger: #a34840;
   --accent-undo: #4a7eb5;
@@ -70,6 +74,7 @@ html[data-theme="dark"] {
   --chess960: #8fb4c0;
   --queer: #c9a0b8;
   --queer-pastel: #f0b8c4, #f0d4b0, #e4e4b8, #c0e0c4, #b8d4e8, #d0c0e4, #f0b8c4;
+  --queer-pastel-ink: #f0b8c4, #f0d4b0, #e4e4b8, #c0e0c4, #b8d4e8, #d0c0e4, #f0b8c4;
   --horde: #e0bc6a;
   --danger: #e08b84;
   --accent-undo: #7aabdb;
@@ -155,10 +160,15 @@ a:focus-visible {
   position: relative;
   z-index: 3;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  padding: 1.1rem clamp(1rem, 3vw, 1.75rem);
+  padding:
+    max(0.65rem, env(safe-area-inset-top, 0px))
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-right, 0px))
+    0.65rem
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-left, 0px));
   gap: 1rem;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
@@ -189,19 +199,58 @@ a:focus-visible {
   border-bottom-color: var(--moss);
 }
 
+.site-foot {
+  flex: 0 0 auto;
+  padding-top: clamp(0.35rem, 1vh, 1rem);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.gh-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  opacity: 0.55;
+  padding: 0.35rem;
+  border-radius: 0.4rem;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.gh-link:hover,
+.gh-link:focus-visible {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.gh-icon {
+  display: block;
+}
+
 /* —— landing —— */
+
+/* Lock chrome to the viewport so the menu adapts instead of scrolling. */
+#app:has(> .landing) {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
 .landing {
   position: relative;
   width: 100%;
   margin: 0;
-  /* Hero fills the viewport under the topbar — frost sizes to this, not the menu. */
-  min-height: calc(100dvh - 4.5rem);
-  padding: 1.25rem 1.25rem 4rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: clamp(0.45rem, 1.4vh, 1.15rem) 1.25rem clamp(0.55rem, 1.6vh, 1.15rem);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--landing-gap);
+  gap: clamp(0.4rem, 1.3vh, var(--landing-gap));
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .landing-wash {
@@ -286,12 +335,15 @@ a:focus-visible {
   width: 100%;
   max-width: 42rem;
   padding-inline: 0.25rem;
+  flex: 0 0 auto;
+  /* A little air between the tagline and the preview board. */
+  margin-bottom: clamp(0.35rem, 1.2vh, 0.85rem);
 }
 
 .landing-hero h1 {
   font-family: var(--font-display);
   font-weight: 600;
-  /* One line: scales with viewport so the full tagline fits */
+  /* Scales with viewport; wraps below desktop so it isn't clipped */
   font-size: clamp(0.85rem, 0.35rem + 2.4vw, 2.05rem);
   line-height: 1.2;
   letter-spacing: 0.01em;
@@ -299,22 +351,62 @@ a:focus-visible {
   margin: 0;
   max-width: none;
   width: 100%;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--moss-deep);
 }
 
 .landing-preview {
-  display: grid;
-  justify-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   gap: var(--landing-stack);
   width: 100%;
   max-width: min(32rem, 100%);
-  /* Override inherited play-board size (`.board` uses --board-size). */
-  --board-size: min(480px, 88vw);
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Board fills leftover space between modes and the CTA — sized from this
+   slot only, so mode/CTA chrome isn't baked into a magic svh/cqh formula. */
+.landing-preview .preview-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  /* Plate pad (0.4rem×2) + border so the square fits inside the slot. */
+  --board-size: min(360px, calc(100cqi - 1rem), calc(100cqh - 1rem));
 }
 
 .landing-preview .mode-toggle {
   max-width: min(28rem, 100%);
+  flex: 0 0 auto;
+}
+
+/* Always reserve Kings/Queens row height so the board doesn't jump on mode change. */
+.landing-preview .mode-sub {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  min-height: 1.35rem;
+  width: 100%;
+  /* Sit nearer the mode tabs; leave air above Play. */
+  margin-top: calc(var(--landing-stack) * -1);
+  padding-bottom: 0.55rem;
+}
+
+.landing-preview .queer-variant {
+  flex: 0 0 auto;
+}
+
+.landing-preview .preview-plate {
+  max-width: 100%;
 }
 
 .preview-plate {
@@ -370,7 +462,7 @@ a:focus-visible {
 }
 
 .preview-board .piece {
-  font-size: clamp(1.35rem, 5.5vw, 2.05rem);
+  font-size: clamp(1rem, calc(var(--board-size) / 11.5), 2.05rem);
 }
 
 .mode-toggle {
@@ -432,7 +524,7 @@ a:focus-visible {
 .mode-link.active.queer,
 .mode-link.queer.active {
   border-bottom-color: transparent;
-  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-image: linear-gradient(90deg, var(--queer-pastel-ink));
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -484,7 +576,7 @@ a:focus-visible {
 
 .queer-link.active {
   border-bottom-color: transparent;
-  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-image: linear-gradient(90deg, var(--queer-pastel-ink));
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -521,7 +613,8 @@ a:focus-visible {
 }
 
 .seed-ritual input {
-  width: 9ch;
+  width: min(9ch, 100%);
+  max-width: 100%;
   min-width: 0;
   border: none;
   border-bottom: 1px solid var(--line);
@@ -590,10 +683,18 @@ a:focus-visible {
   width: 100%;
   max-width: var(--landing-menu);
   justify-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .landing-cta .play-btn {
-  justify-self: stretch;
+  /* Content-sized — don't stretch to the full menu column. */
+  justify-self: center;
+  width: auto;
+  min-width: 8.5rem;
+  min-height: var(--touch-min);
+  font-size: clamp(0.85rem, 0.72rem + 0.45vw, 1.05rem);
+  padding: clamp(0.7rem, 0.45rem + 1vh, 1rem) clamp(1.6rem, 1.1rem + 2.5vw, 2.75rem);
 }
 
 .landing-cta .error-line {
@@ -605,6 +706,7 @@ a:focus-visible {
 .landing-cta .seed-ritual,
 .landing-cta .remote-toggle,
 .landing-cta .setup-toggle,
+.landing-cta .setup-slot,
 .landing-cta .remote-join {
   width: 100%;
   justify-self: stretch;
@@ -617,9 +719,10 @@ a:focus-visible {
 .fen-panel,
 .remote-join {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   column-gap: var(--landing-stack);
-  align-items: baseline;
+  align-items: center;
+  min-width: 0;
 }
 
 .remote-toggle [data-action="create-room"],
@@ -629,21 +732,30 @@ a:focus-visible {
   text-align: right;
 }
 
-.setup-toggle.fen-only {
-  grid-template-columns: 1fr;
-}
-
-.setup-toggle.fen-only [data-action="toggle-fen"] {
-  grid-column: 1;
-  justify-self: center;
-  text-align: center;
-}
-
 .remote-toggle [data-action="toggle-join"],
-.setup-toggle [data-action="toggle-seed"] {
+.setup-toggle [data-action="toggle-seed"],
+.setup-toggle .setup-spacer {
   grid-column: 3;
   justify-self: start;
   text-align: left;
+}
+
+/* Invisible stand-in so FEN stays put when Seed/ID isn't available. */
+.setup-spacer {
+  font-size: var(--label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Reserve FEN/seed panel height so opening either doesn't shove the board. */
+.setup-slot {
+  min-height: 4.6rem;
+  display: grid;
+  align-content: start;
 }
 
 .remote-link,
@@ -686,9 +798,22 @@ a:focus-visible {
 
 .fen-panel textarea {
   grid-column: 2;
-  width: 12rem;
-  max-width: calc(100vw - 4rem);
+  width: min(12rem, 100%);
+  max-width: 100%;
   justify-self: center;
+  min-height: 2.4rem;
+  max-height: 4.5rem;
+  resize: vertical;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0.2rem 0.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.3;
+  background: transparent;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
 }
 
 .fen-panel .text-btn {
@@ -698,7 +823,8 @@ a:focus-visible {
 
 .remote-join input {
   grid-column: 2;
-  width: 8.5rem;
+  width: min(8.5rem, 100%);
+  max-width: 100%;
   justify-self: center;
   border: none;
   border-bottom: 1px solid var(--line);
@@ -724,23 +850,6 @@ a:focus-visible {
   font-size: var(--label-size);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.fen-panel textarea {
-  width: 12rem;
-  max-width: calc(100vw - 4rem);
-  min-height: 2.4rem;
-  max-height: 4.5rem;
-  resize: vertical;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  padding: 0.2rem 0.1rem;
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  line-height: 1.3;
-  background: transparent;
-  overflow-x: hidden;
 }
 
 .fen-panel textarea:focus-visible {
@@ -924,7 +1033,11 @@ html[data-theme="dark"] .primary-btn {
   min-height: calc(100dvh - 4rem);
   display: grid;
   place-items: center;
-  padding: 2rem 1.25rem 3rem;
+  padding:
+    2rem
+    max(1.25rem, env(safe-area-inset-right, 0px))
+    max(3rem, env(safe-area-inset-bottom, 0px))
+    max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
 .lobby-wash {
@@ -996,7 +1109,11 @@ html[data-theme="dark"] .primary-btn {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   gap: 1.5rem;
-  padding: 0 clamp(1rem, 3vw, 1.75rem) 2.5rem;
+  padding:
+    0
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-right, 0px))
+    max(2.5rem, env(safe-area-inset-bottom, 0px))
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-left, 0px));
   max-width: 1080px;
   margin: 0 auto;
   align-items: start;
@@ -1054,7 +1171,7 @@ html[data-theme="dark"] .primary-btn {
 
 .status-meta.queer {
   border-bottom: none;
-  background-image: linear-gradient(90deg, var(--queer-pastel));
+  background-image: linear-gradient(90deg, var(--queer-pastel-ink));
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -1715,11 +1832,302 @@ html[data-theme="dark"] .primary-btn {
   }
 }
 
-/* Keep the board square fixed; only shrink when the viewport can't fit 480px */
-@media (max-width: 560px) {
+/* Desktop: single-line hero when the viewport is wide enough. */
+@media (min-width: 1025px) {
+  .landing-hero h1 {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+}
+
+/*
+  Touch band (≤1024) — scale interactive chrome to --touch-min.
+  Layout width bands below refine spacing / board / order.
+*/
+@media (max-width: 1024px) {
+  :root {
+    --text-btn-pad: 0.55rem 0.25rem;
+  }
+
+  .theme-btn {
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .gh-link {
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+    padding: 0.5rem;
+  }
+
+  .landing .mode-link,
+  .landing .queer-link,
+  .landing .remote-link,
+  .landing .setup-link,
+  .landing .text-btn {
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+  }
+
+  .landing .seed-roll {
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+    padding: 0.5rem;
+  }
+
+  .landing-cta .play-btn {
+    min-height: var(--touch-min);
+  }
+
+  .lobby-card .text-btn {
+    min-height: var(--touch-min);
+    padding: 0.5rem 0.4rem;
+  }
+}
+
+/* Tablet (769–1024): wider preview/menu; board above modes. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  :root {
+    --landing-menu: 22rem;
+    --landing-gap: 0.85rem;
+  }
+
+  .landing {
+    padding: 0.75rem max(1.5rem, env(safe-area-inset-right, 0px))
+      max(1rem, env(safe-area-inset-bottom, 0px))
+      max(1.5rem, env(safe-area-inset-left, 0px));
+    gap: 0.85rem;
+  }
+
+  .landing-hero h1 {
+    font-size: clamp(1.25rem, 2.4vw, 1.85rem);
+  }
+
+  .landing-preview {
+    max-width: min(40rem, 100%);
+  }
+
+  .landing-preview .preview-slot {
+    --board-size: min(480px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+  }
+
+  .landing-preview .mode-toggle {
+    max-width: min(36rem, 100%);
+    flex-wrap: wrap;
+  }
+
+  .landing-preview .mode-link {
+    font-size: 1.35rem;
+    padding: 0.5rem 0.2rem;
+  }
+
+  .landing-preview .mode-sep {
+    font-size: 1.35rem;
+  }
+
+  .landing-cta {
+    max-width: 22rem;
+  }
+
+  .landing-cta .play-btn {
+    min-width: 10rem;
+    font-size: 1.05rem;
+    padding: 0.95rem 2.5rem;
+  }
+}
+
+/* Compact tablet (641–768): board above modes; wrap tabs; mid-size board. */
+@media (min-width: 641px) and (max-width: 768px) {
+  :root {
+    --landing-menu: 20rem;
+    --landing-gap: 0.65rem;
+  }
+
+  .landing {
+    padding: 0.55rem max(1.15rem, env(safe-area-inset-right, 0px))
+      max(0.75rem, env(safe-area-inset-bottom, 0px))
+      max(1.15rem, env(safe-area-inset-left, 0px));
+    gap: 0.55rem;
+  }
+
+  .landing-hero h1 {
+    font-size: clamp(1.1rem, 2.8vw, 1.55rem);
+  }
+
+  .landing-preview {
+    max-width: min(36rem, 100%);
+  }
+
+  .landing-preview .preview-slot {
+    --board-size: min(420px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+  }
+
+  .landing-preview .mode-toggle {
+    max-width: 100%;
+    flex-wrap: wrap;
+    column-gap: 0.5rem;
+    row-gap: 0.15rem;
+  }
+
+  .landing-preview .mode-link {
+    font-size: 1.2rem;
+    padding: 0.45rem 0.15rem;
+  }
+
+  .landing-preview .mode-sep {
+    font-size: 1.2rem;
+  }
+
+  .landing-cta {
+    max-width: 20rem;
+  }
+
+  .landing-cta .play-btn {
+    min-width: 9.5rem;
+    font-size: 1rem;
+    padding: 0.85rem 2.25rem;
+  }
+}
+
+/*
+  Short landscape (e.g. 1024×600) — tablet width rules assume vertical room.
+  Put modes above the board, collapse reserved wells, and dial back chrome.
+*/
+@media (min-width: 641px) and (max-height: 700px) {
+  :root {
+    --landing-gap: 0.35rem;
+    --landing-stack: 0.4rem;
+    --text-btn-pad: 0.3rem 0.2rem;
+  }
+
+  .topbar {
+    padding:
+      max(0.25rem, env(safe-area-inset-top, 0px))
+      max(1rem, env(safe-area-inset-right, 0px))
+      0.2rem
+      max(1rem, env(safe-area-inset-left, 0px));
+  }
+
+  .brand-mark {
+    font-size: 1.2rem;
+  }
+
+  .theme-btn,
+  .gh-link {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+
+  .gh-link {
+    padding: 0.3rem;
+  }
+
+  .landing {
+    padding: 0.25rem max(1rem, env(safe-area-inset-right, 0px))
+      max(0.35rem, env(safe-area-inset-bottom, 0px))
+      max(1rem, env(safe-area-inset-left, 0px));
+    gap: 0.3rem;
+  }
+
+  .landing-wash::before {
+    font-size: clamp(4rem, 14vw, 8rem);
+    opacity: 0.22;
+    top: 18%;
+  }
+
+  .landing-wash::after {
+    font-size: clamp(5rem, 18vw, 11rem);
+    opacity: 0.24;
+    top: 4%;
+  }
+
+  .landing-hero {
+    margin-bottom: 0.1rem;
+  }
+
+  .landing-hero h1 {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    font-size: clamp(0.95rem, 1.6vw, 1.35rem);
+  }
+
+  .landing-preview {
+    max-width: min(28rem, 100%);
+  }
+
+  .landing-preview .mode-toggle {
+    order: -2;
+    max-width: 100%;
+    flex-wrap: nowrap;
+    column-gap: 0.5rem;
+  }
+
+  .landing-preview .mode-sub {
+    order: -1;
+    margin-top: 0;
+    padding-bottom: 0.15rem;
+    min-height: 0;
+  }
+
+  .landing-preview .preview-slot {
+    order: 0;
+    --board-size: min(280px, calc(100cqi - 1rem), calc(100cqh - 0.5rem));
+  }
+
+  .landing-preview .mode-link {
+    font-size: 1.05rem;
+    padding: 0.25rem 0.15rem;
+    min-height: 2.25rem;
+  }
+
+  .landing-preview .mode-sep {
+    font-size: 1.05rem;
+  }
+
+  .landing .queer-link,
+  .landing .remote-link,
+  .landing .setup-link,
+  .landing .text-btn {
+    min-height: 2.25rem;
+  }
+
+  .landing .seed-roll {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0.3rem;
+  }
+
+  .setup-slot {
+    min-height: 0;
+  }
+
+  .landing-cta {
+    max-width: 18rem;
+    gap: 0.3rem;
+  }
+
+  .landing-cta .play-btn {
+    min-width: 8.5rem;
+    min-height: 2.25rem;
+    font-size: 0.92rem;
+    padding: 0.5rem 1.75rem;
+  }
+
+  .site-foot {
+    padding-top: 0.1rem;
+  }
+}
+
+/* Phone (≤640): modes above board, wrap, denser chrome. */
+@media (max-width: 640px) {
   :root {
     --board-size: 320px;
     --plate-pad: 0.55rem;
+    --landing-menu: min(18rem, 100%);
+    --landing-gap: 0.35rem;
   }
 
   .piece {
@@ -1729,5 +2137,170 @@ html[data-theme="dark"] .primary-btn {
   .rank-gutter,
   .file-gutter {
     font-size: 0.9rem;
+  }
+
+  /* Slim chrome — SE-class heights can't spare ~60px of topbar padding. */
+  .topbar {
+    padding:
+      max(0.2rem, env(safe-area-inset-top, 0px))
+      max(0.75rem, env(safe-area-inset-right, 0px))
+      0.15rem
+      max(0.75rem, env(safe-area-inset-left, 0px));
+    gap: 0.5rem;
+    min-height: 0;
+  }
+
+  .brand-mark {
+    font-size: 1.15rem;
+    letter-spacing: 0.06em;
+  }
+
+  .topbar .theme-btn {
+    min-height: 2.5rem;
+    padding: 0.35rem 0.15rem;
+  }
+
+  .landing {
+    padding: 0.2rem max(0.75rem, env(safe-area-inset-right, 0px))
+      max(0.25rem, env(safe-area-inset-bottom, 0px))
+      max(0.75rem, env(safe-area-inset-left, 0px));
+    gap: 0.25rem;
+  }
+
+  .landing-wash::before {
+    font-size: clamp(5rem, 22vw, 10rem);
+    left: calc(50% - min(18rem, 46vw) - 0.5rem);
+    opacity: 0.28;
+  }
+
+  .landing-wash::after {
+    font-size: clamp(7rem, 28vw, 14rem);
+    left: calc(50% + min(18rem, 46vw) + 0.5rem);
+    opacity: 0.3;
+  }
+
+  .landing-hero {
+    margin-bottom: 0.1rem;
+  }
+
+  .landing-hero h1 {
+    font-size: clamp(0.85rem, 3.8vw, 1.15rem);
+    line-height: 1.15;
+  }
+
+  .landing-preview .mode-toggle {
+    order: -2;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    max-width: 100%;
+    column-gap: 0.45rem;
+    row-gap: 0;
+    justify-content: center;
+  }
+
+  .landing-preview .preview-slot {
+    order: 0;
+    --board-size: min(360px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+  }
+
+  .landing-preview .mode-sub {
+    order: -1;
+    margin-top: 0;
+    padding-bottom: 0.2rem;
+    min-height: 1.1rem;
+  }
+
+  .landing-preview .mode-link {
+    flex: 0 0 auto;
+    font-size: 1.05rem;
+    padding: 0.35rem 0.12rem;
+    min-height: 2.5rem;
+  }
+
+  .landing-preview .mode-sep {
+    flex: 0 0 auto;
+    font-size: 1.05rem;
+  }
+
+  .landing .remote-link,
+  .landing .setup-link,
+  .landing .text-btn,
+  .landing .queer-link {
+    min-height: 2.5rem;
+  }
+
+  /* Don't reserve a tall empty FEN/seed well on short phones. */
+  .setup-slot {
+    min-height: 0;
+  }
+
+  .landing-cta {
+    gap: 0.35rem;
+  }
+
+  .landing-cta .play-btn {
+    min-width: 9rem;
+    min-height: 2.5rem;
+    font-size: 0.92rem;
+    padding: 0.55rem 1.75rem;
+  }
+
+  .site-foot {
+    padding-top: 0.15rem;
+  }
+
+  .gh-link {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0.35rem;
+  }
+}
+
+/* iPhone SE / short phones: squeeze chrome further so the board stays usable. */
+@media (max-width: 640px) and (max-height: 700px) {
+  .topbar {
+    padding-top: max(0.1rem, env(safe-area-inset-top, 0px));
+    padding-bottom: 0;
+  }
+
+  .brand-mark {
+    font-size: 1.05rem;
+  }
+
+  .landing-hero {
+    margin-bottom: 0;
+  }
+
+  .landing-hero h1 {
+    font-size: clamp(0.78rem, 3.4vw, 1rem);
+  }
+
+  .landing-preview .mode-link {
+    font-size: 0.95rem;
+    min-height: 2.25rem;
+    padding: 0.25rem 0.1rem;
+  }
+
+  .landing .remote-link,
+  .landing .setup-link,
+  .landing .text-btn,
+  .landing .queer-link,
+  .topbar .theme-btn,
+  .landing-cta .play-btn,
+  .gh-link {
+    min-height: 2.25rem;
+  }
+
+  .gh-link {
+    min-width: 2.25rem;
+  }
+
+  .landing-preview .mode-sub {
+    min-height: 0;
+    padding-bottom: 0.1rem;
+  }
+
+  .site-foot {
+    padding-top: 0;
   }
 }

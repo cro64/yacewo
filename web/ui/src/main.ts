@@ -1088,6 +1088,25 @@ class App {
     `;
   }
 
+  private renderFooter() {
+    return `
+      <footer class="site-foot">
+        <a
+          class="gh-link"
+          href="https://github.com/cro64/yacewo"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="YACEWO on GitHub"
+          title="GitHub"
+        >
+          <svg class="gh-icon" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+        </a>
+      </footer>
+    `;
+  }
+
   private renderPreviewBoard() {
     const anim = this.previewAnim ? " is-settling" : "";
     const plateMod =
@@ -1115,8 +1134,10 @@ class App {
       .join("");
     return `
       <div class="landing-preview${anim}">
-        <div class="board-plate${plateMod}" aria-hidden="true">
-          <div class="board preview-board">${squares}</div>
+        <div class="preview-slot">
+          <div class="board-plate${plateMod}" aria-hidden="true">
+            <div class="board preview-board">${squares}</div>
+          </div>
         </div>
         <div class="mode-toggle" role="tablist" aria-label="Game mode">
           <button type="button" role="tab" class="mode-link${this.mode === "classical" ? " active" : ""}" data-mode="classical" aria-selected="${this.mode === "classical"}">Classical</button>
@@ -1133,15 +1154,17 @@ class App {
               : ""
           }
         </div>
-        ${
-          isQueerUnlocked() && this.mode === "queer"
-            ? `<div class="queer-variant" role="group" aria-label="Queer variant">
-                 <button type="button" class="text-btn queer-link${this.queerVariant === "kings" ? " active" : ""}" data-queer="kings">Kings</button>
-                 <span class="mode-sep" aria-hidden="true">·</span>
-                 <button type="button" class="text-btn queer-link${this.queerVariant === "queens" ? " active" : ""}" data-queer="queens">Queens</button>
-               </div>`
-            : ""
-        }
+        <div class="mode-sub${isQueerUnlocked() && this.mode === "queer" ? " is-open" : ""}">
+          ${
+            isQueerUnlocked() && this.mode === "queer"
+              ? `<div class="queer-variant" role="group" aria-label="Queer variant">
+                   <button type="button" class="text-btn queer-link${this.queerVariant === "kings" ? " active" : ""}" data-queer="kings">Kings</button>
+                   <span class="mode-sep" aria-hidden="true">·</span>
+                   <button type="button" class="text-btn queer-link${this.queerVariant === "queens" ? " active" : ""}" data-queer="queens">Queens</button>
+                 </div>`
+              : ""
+          }
+        </div>
       </div>
     `;
   }
@@ -1172,40 +1195,39 @@ class App {
                 </div>`
               : ""
           }
-          <div class="setup-toggle${isSeededMode(this.mode) ? "" : " fen-only"}" role="group" aria-label="Position setup">
+          <div class="setup-toggle" role="group" aria-label="Position setup">
             <button type="button" class="text-btn setup-link${this.fenOpen ? " active" : ""}" data-action="toggle-fen" aria-expanded="${this.fenOpen}">FEN</button>
+            <span class="mode-sep" aria-hidden="true">·</span>
             ${
               this.mode === "anarchy"
-                ? `<span class="mode-sep" aria-hidden="true">·</span>
-                   <button type="button" class="text-btn setup-link${this.seedOpen ? " active anarchy" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">Seed</button>`
+                ? `<button type="button" class="text-btn setup-link${this.seedOpen ? " active anarchy" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">Seed</button>`
                 : this.mode === "chess960"
-                  ? `<span class="mode-sep" aria-hidden="true">·</span>
-                     <button type="button" class="text-btn setup-link${this.seedOpen ? " active chess960" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">ID</button>`
+                  ? `<button type="button" class="text-btn setup-link${this.seedOpen ? " active chess960" : ""}" data-action="toggle-seed" aria-expanded="${this.seedOpen}">ID</button>`
+                  : `<span class="setup-spacer" aria-hidden="true">Seed</span>`
+            }
+          </div>
+          <div class="setup-slot">
+            ${
+              this.fenOpen
+                ? `<div class="fen-panel">
+                    <textarea id="fen" rows="2" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" aria-label="FEN">${escapeHtml(this.fenInput)}</textarea>
+                    <button type="button" class="text-btn" data-action="load-fen">Load</button>
+                  </div>`
+                : isSeededMode(this.mode) && this.seedOpen
+                  ? `<div class="seed-ritual${this.mode === "chess960" ? " chess960" : ""}">
+                      <input id="seed" inputmode="numeric" ${this.mode === "chess960" ? 'min="0" max="959" maxlength="3" ' : ""}placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
+                      <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
+                        <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                          <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
+                        </svg>
+                      </button>
+                    </div>`
                   : ""
             }
           </div>
-          ${
-            this.fenOpen
-              ? `<div class="fen-panel">
-                  <textarea id="fen" rows="2" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" aria-label="FEN">${escapeHtml(this.fenInput)}</textarea>
-                  <button type="button" class="text-btn" data-action="load-fen">Load</button>
-                </div>`
-              : ""
-          }
-          ${
-            isSeededMode(this.mode) && this.seedOpen
-              ? `<div class="seed-ritual${this.mode === "chess960" ? " chess960" : ""}">
-                  <input id="seed" inputmode="numeric" ${this.mode === "chess960" ? 'min="0" max="959" maxlength="3" ' : ""}placeholder="${this.mode === "chess960" ? "0–959" : "random"}" value="${escapeAttr(this.seedInput)}" aria-label="${this.mode === "chess960" ? "Chess960 ID" : "Seed"}" />
-                  <button type="button" class="text-btn seed-roll" data-action="roll-seed" aria-label="Shuffle" title="Shuffle">
-                    <svg class="seed-roll-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
-                      <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 4h3.2l5.6 8H14M14 4h-3.2L8.2 7.2M2 12h3.2l1.8-2.4M12.5 2.5 14 4l-1.5 1.5M12.5 10.5 14 12l-1.5 1.5"/>
-                    </svg>
-                  </button>
-                </div>`
-              : ""
-          }
           ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
         </section>
+        ${this.renderFooter()}
       </main>
     `;
   }
