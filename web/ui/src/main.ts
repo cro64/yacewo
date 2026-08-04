@@ -25,6 +25,14 @@ import {
   themeLabel,
   type ThemeMode,
 } from "./theme";
+import {
+  isSoundOn,
+  play,
+  playMoveOutcome,
+  soundLabel,
+  toggleSound,
+  unlockAudio,
+} from "./sound";
 
 type Screen = "landing" | "lobby" | "play";
 type ActionMsg = Exclude<
@@ -358,6 +366,7 @@ class App {
   private flashCopied(kind: NonNullable<App["copiedFlash"]>) {
     if (this.copiedTimer != null) clearTimeout(this.copiedTimer);
     this.copiedFlash = kind;
+    play("copy");
     this.render();
     this.copiedTimer = setTimeout(() => {
       this.copiedFlash = null;
@@ -601,6 +610,7 @@ class App {
       onPeerJoined: () => {
         this.reconnecting = false;
         if (this.error.startsWith("Opponent left")) this.error = "";
+        play("connect");
         this.render();
       },
       onPeerLeft: () => {
@@ -647,6 +657,7 @@ class App {
     this.remoteSetup = setup;
     this.playMode = playModeFromSetup(setup);
     if (setup.kind === "queer") this.queerVariant = setup.variant;
+    play(setup.kind === "queer" ? "queer" : "start");
     this.myColor = color;
     this.reconnecting = false;
     this.clearMoveHighlights();
@@ -708,8 +719,49 @@ class App {
     }
   }
 
+  private soundForAction(msg: ActionMsg | null, game: GameSnapshot) {
+    if (!msg) return;
+    switch (msg.type) {
+      case "move":
+        playMoveOutcome({
+          kind: "move",
+          moveList: game.moveList,
+          promo: msg.promo,
+          statusTag: game.status.tag,
+        });
+        break;
+      case "castle":
+        playMoveOutcome({
+          kind: "castle",
+          statusTag: game.status.tag,
+        });
+        break;
+      case "notation":
+        playMoveOutcome({
+          kind: "notation",
+          moveList: game.moveList,
+          statusTag: game.status.tag,
+        });
+        break;
+      case "undo":
+        playMoveOutcome({ kind: "undo" });
+        break;
+      case "resign":
+        playMoveOutcome({ kind: "resign" });
+        break;
+      case "draw":
+        playMoveOutcome({
+          kind: "draw",
+          statusTag: game.status.tag,
+          offeredOnly: !game.isOver,
+        });
+        break;
+    }
+  }
+
   private tryLocalAction(result: EngineResult, msg: ActionMsg | null) {
     if (!result.ok || !result.game) {
+      play("illegal");
       this.error = result.error ?? "Something went wrong";
       this.render();
       return;
@@ -717,6 +769,7 @@ class App {
     this.noteActionHighlight(msg);
     this.setGame(result.game);
     this.screen = "play";
+    this.soundForAction(msg, result.game);
     if (msg) this.sendAction(msg);
     this.render();
   }
@@ -759,6 +812,7 @@ class App {
     }
     this.noteActionHighlight(msg);
     this.setGame(result.game);
+    this.soundForAction(msg, result.game);
     this.render();
   }
 
@@ -948,6 +1002,7 @@ class App {
     okScreen: Screen = "play",
   ) {
     if (!result.ok || !result.game) {
+      play("illegal");
       this.error = result.error ?? "Something went wrong";
       this.render();
       return;
@@ -955,6 +1010,9 @@ class App {
     this.clearMoveHighlights();
     this.setGame(result.game);
     this.screen = okScreen;
+    if (okScreen === "play") {
+      play(this.playMode === "queer" ? "queer" : "start");
+    }
     this.render();
   }
 
@@ -977,6 +1035,7 @@ class App {
     this.error = "";
     this.queerLegalColor =
       this.playMode === "queer" ? pickQueerLegalColor() : null;
+    play("select");
   }
 
   private clearSelection() {
@@ -999,6 +1058,7 @@ class App {
 
     if (this.selected === alg) {
       this.clearSelection();
+      play("deselect");
       this.render();
       return;
     }
@@ -1034,6 +1094,7 @@ class App {
 
     const targets = this.legalTargets(from).filter((m) => m.to === to);
     if (targets.length === 0) {
+      play("illegal");
       this.error = "Illegal move";
       this.clearSelection();
       this.render();
@@ -1043,6 +1104,7 @@ class App {
     const needsPromo = targets.some((m) => m.promotion);
     if (needsPromo) {
       this.pendingPromo = { from, to };
+      play("ui");
       this.render();
       return;
     }
@@ -1074,7 +1136,10 @@ class App {
             ? `<a class="brand-mark" href="#/" data-nav="landing">YACEWO</a>`
             : `<div class="brand-mark">YACEWO</div>`
         }
-        <button type="button" class="theme-btn" data-action="theme">${themeLabel(this.theme)}</button>
+        <div class="topbar-actions">
+          <button type="button" class="theme-btn" data-action="sound" aria-pressed="${isSoundOn()}">${soundLabel()}</button>
+          <button type="button" class="theme-btn" data-action="theme">${themeLabel(this.theme)}</button>
+        </div>
       </header>
     `;
   }
@@ -1652,6 +1717,9 @@ class App {
       board.classList.remove("wave-white", "wave-black");
       void board.offsetWidth;
       board.classList.add(cls);
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        play(this.mode === "queer" ? "waveQueer" : "wave");
+      }
     });
     board.addEventListener("pointerleave", () => {
       board.classList.remove("wave-white", "wave-black");
@@ -1659,10 +1727,22 @@ class App {
   }
 
   private bind() {
+    unlockAudio();
+
+    this.root.querySelector("[data-action='sound']")?.addEventListener("click", () => {
+      const on = toggleSound();
+      if (on) {
+        unlockAudio();
+        play("ui");
+      }
+      this.render();
+    });
+
     this.root.querySelector("[data-action='theme']")?.addEventListener("click", () => {
       this.theme = cycleTheme(this.theme);
       storeTheme(this.theme);
       applyTheme(this.theme);
+      play("ui");
       this.render();
     });
 
@@ -1717,6 +1797,7 @@ class App {
         if (isSeededMode(next) && this.previewSeed != null) {
           syncSeedInUrl(this.previewSeed, next);
         }
+        play(next === "queer" ? "queer" : "ui");
         this.render();
       });
     });
@@ -1733,6 +1814,7 @@ class App {
         this.error = "";
         syncQueerInUrl(next);
         this.refreshPreview(true);
+        play("queer");
         this.render();
       });
     });
@@ -1927,6 +2009,7 @@ class App {
       const trimmed = this.notation.trim();
       const result = this.api.applyNotation(trimmed);
       if (!result.ok || !result.game) {
+        play("illegal");
         this.error = result.error ?? "Illegal move";
         this.render();
         return;
@@ -1934,6 +2017,11 @@ class App {
       this.setGame(result.game);
       this.clearMoveHighlights();
       this.notation = "";
+      playMoveOutcome({
+        kind: "notation",
+        moveList: result.game.moveList,
+        statusTag: result.game.status.tag,
+      });
       this.sendAction({ type: "notation", n: trimmed });
       this.render();
     });

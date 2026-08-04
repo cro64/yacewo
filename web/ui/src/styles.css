@@ -294,6 +294,12 @@ a:focus-visible {
   line-height: 1;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .theme-btn {
   border: none;
   background: transparent;
@@ -309,6 +315,10 @@ a:focus-visible {
 .theme-btn:hover {
   color: var(--ink);
   border-bottom-color: var(--moss);
+}
+
+.theme-btn[aria-pressed="true"] {
+  color: var(--moss-deep);
 }
 
 .site-foot {
