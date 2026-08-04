@@ -313,6 +313,7 @@ class App {
   private queerLegalColor: string | null = null;
   private error = "";
   private helpOpen = false;
+  private rulesOpen = false;
   private pendingPromo: { from: string; to: string } | null = null;
   private notation = "";
   /** Landing hero board (non-interactive). */
@@ -386,11 +387,18 @@ class App {
     this.keysBound = true;
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (!this.pendingPromo && !this.selected && !this.helpOpen) return;
+      if (
+        !this.pendingPromo &&
+        !this.selected &&
+        !this.helpOpen &&
+        !this.rulesOpen
+      )
+        return;
       e.preventDefault();
       this.pendingPromo = null;
       this.clearSelection();
       this.helpOpen = false;
+      this.rulesOpen = false;
       this.render();
     });
   }
@@ -1394,65 +1402,82 @@ class App {
     `;
   }
 
-  /** Mode-aware help: shared controls plus only the active variant’s rules. */
+  /** Controls-only help (variant rules live under Rules). */
   private renderHelp(): string {
     const remote = this.isRemote();
     const notation =
       this.playMode === "queer"
         ? "e4, Nf3, O-O, exd5, e8=Q, e8=K"
         : "e4, Nf3, O-O, exd5, e8=Q";
+    const prefs = remote
+      ? "Last move, Coords"
+      : "Last move, Coords, Auto-flip";
     const items: string[] = [
-      "Click a piece, then a highlighted square. Escape clears the selection or closes Help.",
-      `Or type notation: ${notation}.`,
-      "Last move and Coords can be toggled above the game actions (off by default).",
-      "Draw offers; the other side accepts with Draw or declines by moving.",
+      "Click a piece, then a highlighted square. Escape clears selection or closes Help/Rules.",
+      `Type notation: ${notation}.`,
+      `Toggle ${prefs} above (off by default).`,
+      "Draw offers or accepts; decline by moving.",
     ];
     if (remote) {
-      items.push("Host is White; moves sync peer-to-peer. Undo is disabled online.");
+      items.push("Host is White; undo is disabled online.");
     } else {
       items.push("Undo takes back the last half-move.");
-      items.push("Auto-flip orients the board to the side to move.");
-    }
-
-    switch (this.playMode) {
-      case "anarchy":
-        items.push(
-          "Random armies with fixed kings; the seed is in the panel and as a seventh FEN field.",
-        );
-        items.push("Share as <code>?seed=…</code>.");
-        break;
-      case "chess960":
-        items.push(
-          "FIDE / Scharnagl IDs <strong>0–959</strong> (SP-518 = classical). Castling ends on c/g (king) and d/f (rook).",
-        );
-        items.push(
-          "The ID is in the panel and as a seventh FEN field (<code>960</code>). Share as <code>?mode=chess960&amp;seed=…</code>.",
-        );
-        break;
-      case "horde":
-        items.push(
-          "White has 36 pawns; rank-1 pawns may double-step. Black wins by capturing every White piece.",
-        );
-        items.push(
-          "FEN ends with <code>horde</code>. Share as <code>?mode=horde</code>.",
-        );
-        break;
-      case "queer":
-        items.push(
-          this.queerVariant === "queens"
-            ? "Double Queens (<code>RNBQQBNR</code>): both queens are critical and must stay safe each turn."
-            : "Double Kings (<code>RNBKKBNR</code>): both kings are critical and must stay safe each turn.",
-        );
-        items.push(
-          "Pawns may promote to king. Share as <code>?mode=dk</code> or <code>?mode=dq</code>.",
-        );
-        break;
-      default:
-        break;
     }
 
     return `<div class="help">
                   <strong>Help</strong>
+                  <ul>
+                    ${items.map((li) => `<li>${li}</li>`).join("\n                    ")}
+                  </ul>
+                </div>`;
+  }
+
+  /** Mode-specific game rules for the selected / active play mode. */
+  private renderRules(mode: GameMode, queer: QueerVariant): string {
+    const title =
+      mode === "anarchy"
+        ? "Anarchy"
+        : mode === "chess960"
+          ? "Chess960"
+          : mode === "horde"
+            ? "Horde"
+            : mode === "queer"
+              ? queerLabel(queer)
+              : "Classical";
+    const items: string[] = [];
+    switch (mode) {
+      case "anarchy":
+        items.push("Seeded random armies; kings stay on e1/e8.");
+        break;
+      case "chess960":
+        items.push(
+          "Starting positions 0–959 (518 = classical). Castling ends on c/g (king) and d/f (rook).",
+        );
+        break;
+      case "horde":
+        items.push(
+          "White fields 36 pawns; rank-1 pawns may double-step. Black wins by capturing every White piece.",
+        );
+        break;
+      case "queer":
+        items.push(
+          queer === "queens"
+            ? "Both queens are critical and must stay safe each turn."
+            : "Both kings are critical and must stay safe each turn.",
+        );
+        items.push(
+          queer === "queens"
+            ? "Pawns may promote to queen or king (kings are ordinary)."
+            : "Pawns may promote to king.",
+        );
+        break;
+      default:
+        items.push("Standard chess rules.");
+        break;
+    }
+
+    return `<div class="rules">
+                  <strong>${title}</strong>
                   <ul>
                     ${items.map((li) => `<li>${li}</li>`).join("\n                    ")}
                   </ul>
@@ -1582,9 +1607,11 @@ class App {
             <button type="button" class="action-btn" data-action="resign" ${
               g.isOver || (this.isRemote() && !this.isMyTurn()) ? "disabled" : ""
             }>Resign</button>
+            <button type="button" class="action-btn" data-action="rules">Rules</button>
             <button type="button" class="action-btn" data-action="help">Help</button>
             <button type="button" class="action-btn" data-action="new">Quit</button>
           </div>
+          ${this.rulesOpen ? this.renderRules(this.playMode, this.queerVariant) : ""}
           ${this.helpOpen ? this.renderHelp() : ""}
         </aside>
       </main>
@@ -1943,6 +1970,12 @@ class App {
     });
     this.root.querySelector("[data-action='help']")?.addEventListener("click", () => {
       this.helpOpen = !this.helpOpen;
+      if (this.helpOpen) this.rulesOpen = false;
+      this.render();
+    });
+    this.root.querySelector("[data-action='rules']")?.addEventListener("click", () => {
+      this.rulesOpen = !this.rulesOpen;
+      if (this.rulesOpen) this.helpOpen = false;
       this.render();
     });
     this.root.querySelector("[data-action='toggle-last-move']")?.addEventListener("click", () => {
@@ -1963,6 +1996,7 @@ class App {
       this.screen = "landing";
       this.error = "";
       this.helpOpen = false;
+      this.rulesOpen = false;
       this.refreshPreview(true);
       this.render();
     });
