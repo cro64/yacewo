@@ -87,8 +87,9 @@ Rooms are **not** peer-to-peer: state lives in a [Cloudflare Durable
 Object](yacewo-worker/) (`yacewo-rooms`). Either player can refresh or drop and
 rejoin with the same link — a per-browser identity token keeps host/guest
 roles stable. The side to move can still play while the opponent is away; the
-DO stores moves and syncs them on rejoin. Finished games expire after
-**15 minutes**, unfinished rooms after **24 hours** of inactivity.
+DO stores moves and syncs them on rejoin. Idle sockets hibernate (no duration
+while thinking). Finished games expire after **15 minutes**, unfinished rooms
+after **24 hours** of inactivity.
 
 <p>
   <img src="images/remote-lobby.png" alt="Remote lobby — waiting for opponent with copy link" width="720" />

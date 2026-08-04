@@ -4,6 +4,10 @@ Cloudflare Worker + Durable Object that hosts YACEWO remote rooms.
 Game state lives in the Durable Object — either player can close their tab
 and rejoin without ending the game.
 
+Sockets use the **Hibernation WebSocket API**: idle rooms (lobby wait, think
+time) sleep without disconnecting clients, so free-tier duration is mostly
+handler time rather than wall-clock while connected.
+
 ## Deploy
 
 ```bash
@@ -50,3 +54,6 @@ Durable Object storage is cleared via an alarm:
 - **Unfinished** rooms (waiting / in progress) — **24 hours** after last activity
 
 Any connect or message resets the timer for that room’s current status.
+
+Idle connected clients do **not** keep the DO awake (hibernation); only
+messages, connects, and alarms wake it for billing duration.
