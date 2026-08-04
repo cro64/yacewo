@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>YACEWO — Chess in OCaml</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -13,6 +15,13 @@
     />
   </head>
   <body>
+    <div class="rotate-gate" role="alert" aria-live="polite">
+      <div class="rotate-phone" aria-hidden="true">
+        <span class="rotate-phone-body"></span>
+      </div>
+      <p class="rotate-gate-title">Rotate your device</p>
+      <p class="rotate-gate-copy">YACEWO plays best in portrait.</p>
+    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

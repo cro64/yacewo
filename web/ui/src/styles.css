@@ -15,6 +15,16 @@
   --landing-menu: 18rem;
   --landing-gap: 1.25rem;
   --landing-stack: 0.65rem;
+  /* Board → mode-row air (modes sit directly under the board). */
+  --board-mode-gap: clamp(0.85rem, 0.6rem + 1.2vh, 1.75rem);
+  /*
+    Everything except the board that must stay on-screen:
+    topbar + hero + mode row + Play + remote + setup + footer + gaps.
+    Board height = 100dvh − this − board-mode-gap.
+  */
+  --landing-chrome: 23rem;
+  --landing-board-max: 360px;
+  --landing-board-span: 55vmin;
   --text-btn-size: 0.82rem;
   --text-btn-pad: 0.25rem 0;
   --label-size: 0.72rem;
@@ -102,6 +112,108 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+}
+
+/* Mobile landscape: block the UI and ask for portrait. */
+.rotate-gate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  place-items: center;
+  align-content: center;
+  gap: 0.65rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: linear-gradient(
+    165deg,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg-wash) 70%, var(--bg)) 38%,
+    color-mix(in srgb, var(--moss) 18%, var(--bg-deep)) 72%,
+    var(--bg-deep) 100%
+  );
+  color: var(--moss-deep);
+}
+
+.rotate-phone {
+  width: 3.25rem;
+  height: 3.25rem;
+  display: grid;
+  place-items: center;
+  margin-bottom: 0.35rem;
+}
+
+.rotate-phone-body {
+  display: block;
+  width: 1.55rem;
+  height: 2.45rem;
+  border: 2.5px solid var(--moss-deep);
+  border-radius: 0.35rem;
+  position: relative;
+  opacity: 0.9;
+  transform-origin: center center;
+  animation: rotate-to-portrait 2.4s var(--ease) infinite;
+}
+
+.rotate-phone-body::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0.28rem;
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: var(--moss-deep);
+  transform: translateX(-50%);
+  opacity: 0.55;
+}
+
+@keyframes rotate-to-portrait {
+  0%,
+  18% {
+    transform: rotate(90deg);
+  }
+  42%,
+  68% {
+    transform: rotate(0deg);
+  }
+  88%,
+  100% {
+    transform: rotate(90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-phone-body {
+    animation: none;
+    transform: rotate(0deg);
+  }
+}
+
+.rotate-gate-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.rotate-gate-copy {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .rotate-gate {
+    display: grid;
+  }
+
+  #app {
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
 
 body {
@@ -201,10 +313,33 @@ a:focus-visible {
 
 .site-foot {
   flex: 0 0 auto;
+  flex-shrink: 0;
   padding-top: clamp(0.35rem, 1vh, 1rem);
   display: flex;
   justify-content: center;
   align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+/* Portrait: sit the footer on the bottom edge instead of leaving a void under it.
+   Board grows a bit into spare height; extra air sits above Play, not the mode row. */
+@media (orientation: portrait) {
+  :root {
+    --landing-chrome: 18rem;
+    --landing-board-max: 420px;
+    --landing-board-span: 85vw;
+    --board-mode-gap: clamp(0.85rem, 0.6rem + 1.2vh, 1.75rem);
+    --landing-gap: clamp(1.25rem, 1rem + 2vh, 2.5rem);
+  }
+
+  .landing > .site-foot {
+    margin-top: auto;
+  }
+
+  .landing-cta {
+    margin-top: clamp(0.75rem, 1.5vh, 1.5rem);
+  }
 }
 
 .gh-link {
@@ -230,7 +365,7 @@ a:focus-visible {
 
 /* —— landing —— */
 
-/* Lock chrome to the viewport so the menu adapts instead of scrolling. */
+/* Viewport-locked shell; landing itself scrolls when chrome + board don't fit. */
 #app:has(> .landing) {
   height: 100dvh;
   display: flex;
@@ -248,6 +383,8 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Top-align so short/resizing viewports scroll instead of stacking into each other. */
+  justify-content: flex-start;
   gap: clamp(0.4rem, 1.3vh, var(--landing-gap));
   overflow-x: hidden;
   overflow-y: auto;
@@ -336,6 +473,7 @@ a:focus-visible {
   max-width: 42rem;
   padding-inline: 0.25rem;
   flex: 0 0 auto;
+  flex-shrink: 0;
   /* A little air between the tagline and the preview board. */
   margin-bottom: clamp(0.35rem, 1.2vh, 0.85rem);
 }
@@ -364,28 +502,34 @@ a:focus-visible {
   gap: var(--landing-stack);
   width: 100%;
   max-width: min(32rem, 100%);
-  flex: 1 1 auto;
-  min-height: 0;
+  /* Never shrink — shrinking the slot while the board keeps pixel size
+     is what made modes/CTA collapse into the board on resize. */
+  flex: 0 0 auto;
   min-width: 0;
 }
 
-/* Board fills leftover space between modes and the CTA — sized from this
-   slot only, so mode/CTA chrome isn't baked into a magic svh/cqh formula. */
+/* Board sized from width + leftover viewport (chrome reserved). */
 .landing-preview .preview-slot {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   min-width: 0;
   width: 100%;
   display: grid;
   place-items: center;
-  container-type: size;
-  /* Plate pad (0.4rem×2) + border so the square fits inside the slot. */
-  --board-size: min(360px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+  container-type: inline-size;
+  --board-size: min(
+    var(--landing-board-max),
+    calc(100cqi - 1rem),
+    calc(100dvh - var(--landing-chrome) - var(--board-mode-gap)),
+    var(--landing-board-span)
+  );
+  margin-bottom: var(--board-mode-gap);
 }
 
 .landing-preview .mode-toggle {
   max-width: min(28rem, 100%);
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
 }
 
 /* Always reserve Kings/Queens row height so the board doesn't jump on mode change. */
@@ -396,9 +540,9 @@ a:focus-visible {
   align-items: baseline;
   min-height: 1.35rem;
   width: 100%;
-  /* Sit nearer the mode tabs; leave air above Play. */
-  margin-top: calc(var(--landing-stack) * -1);
   padding-bottom: 0.55rem;
+  position: relative;
+  z-index: 1;
 }
 
 .landing-preview .queer-variant {
@@ -684,14 +828,15 @@ a:focus-visible {
   max-width: var(--landing-menu);
   justify-items: center;
   flex: 0 0 auto;
+  flex-shrink: 0;
   min-width: 0;
+  position: relative;
+  z-index: 2;
 }
 
 .landing-cta .play-btn {
-  /* Content-sized — don't stretch to the full menu column. */
-  justify-self: center;
-  width: auto;
-  min-width: 8.5rem;
+  justify-self: stretch;
+  width: 100%;
   min-height: var(--touch-min);
   font-size: clamp(0.85rem, 0.72rem + 0.45vw, 1.05rem);
   padding: clamp(0.7rem, 0.45rem + 1vh, 1rem) clamp(1.6rem, 1.1rem + 2.5vw, 2.75rem);
@@ -1911,7 +2056,7 @@ html[data-theme="dark"] .primary-btn {
   }
 
   .landing-preview .preview-slot {
-    --board-size: min(480px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+    --landing-board-max: 480px;
   }
 
   .landing-preview .mode-toggle {
@@ -1962,7 +2107,7 @@ html[data-theme="dark"] .primary-btn {
   }
 
   .landing-preview .preview-slot {
-    --board-size: min(420px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+    --landing-board-max: 420px;
   }
 
   .landing-preview .mode-toggle {
@@ -1993,14 +2138,15 @@ html[data-theme="dark"] .primary-btn {
 }
 
 /*
-  Short landscape (e.g. 1024×600) — tablet width rules assume vertical room.
-  Put modes above the board, collapse reserved wells, and dial back chrome.
+  Short viewports (incl. landscape laptops like 1024×600) — compress chrome,
+  keep the vertical board → modes stack, preserve board/mode air.
 */
 @media (min-width: 641px) and (max-height: 700px) {
   :root {
     --landing-gap: 0.35rem;
     --landing-stack: 0.4rem;
     --text-btn-pad: 0.3rem 0.2rem;
+    --landing-chrome: 18rem;
   }
 
   .topbar {
@@ -2059,22 +2205,15 @@ html[data-theme="dark"] .primary-btn {
   }
 
   .landing-preview .mode-toggle {
-    order: -2;
     max-width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     column-gap: 0.5rem;
   }
 
   .landing-preview .mode-sub {
-    order: -1;
     margin-top: 0;
     padding-bottom: 0.15rem;
     min-height: 0;
-  }
-
-  .landing-preview .preview-slot {
-    order: 0;
-    --board-size: min(280px, calc(100cqi - 1rem), calc(100cqh - 0.5rem));
   }
 
   .landing-preview .mode-link {
@@ -2110,7 +2249,6 @@ html[data-theme="dark"] .primary-btn {
   }
 
   .landing-cta .play-btn {
-    min-width: 8.5rem;
     min-height: 2.25rem;
     font-size: 0.92rem;
     padding: 0.5rem 1.75rem;
@@ -2128,6 +2266,10 @@ html[data-theme="dark"] .primary-btn {
     --plate-pad: 0.55rem;
     --landing-menu: min(18rem, 100%);
     --landing-gap: 0.35rem;
+    /* Keep chrome lean so portrait phones can grow the board. */
+    --landing-chrome: 16.5rem;
+    /* Don't crush the Play air from the portrait rule. */
+    --landing-gap: clamp(0.85rem, 0.6rem + 1.5vh, 1.75rem);
   }
 
   .piece {
@@ -2200,7 +2342,9 @@ html[data-theme="dark"] .primary-btn {
 
   .landing-preview .preview-slot {
     order: 0;
-    --board-size: min(360px, calc(100cqi - 1rem), calc(100cqh - 1rem));
+    margin-bottom: 0;
+    /* Modes sit above — space between mode row and board. */
+    margin-top: var(--board-mode-gap);
   }
 
   .landing-preview .mode-sub {
@@ -2302,5 +2446,13 @@ html[data-theme="dark"] .primary-btn {
 
   .site-foot {
     padding-top: 0;
+  }
+}
+
+/* Landscape: a bit more board → modes air, still fluid with height. */
+@media (orientation: landscape) and (min-width: 641px) {
+  :root {
+    --board-mode-gap: clamp(1.1rem, 0.75rem + 2vh, 2.25rem);
+    --landing-chrome: 22rem;
   }
 }

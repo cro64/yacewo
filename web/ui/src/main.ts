@@ -2004,8 +2004,18 @@ function escapeAttr(s: string): string {
   return escapeHtml(s).replaceAll("'", "&#39;");
 }
 
+function preferPortrait() {
+  const ori = window.screen?.orientation as
+    | (ScreenOrientation & { lock?: (orientation: string) => Promise<void> })
+    | undefined;
+  // Only works in installed PWAs / fullscreen — ignore failures in normal tabs.
+  void ori?.lock?.("portrait").catch(() => undefined);
+}
+
 const appEl = document.querySelector<HTMLElement>("#app");
 if (appEl) {
+  preferPortrait();
+  window.addEventListener("orientationchange", preferPortrait);
   const app = new App(appEl);
   void app.boot();
 }
