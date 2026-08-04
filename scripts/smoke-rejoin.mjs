@@ -1,17 +1,45 @@
 /**
- * Smoke: guest mid-game rejoin via ?room=
- * Usage: node scripts/smoke-rejoin.mjs
+ * Smoke: mid-game rejoin via ?room= against a DO-backed rooms Worker.
+ *
+ * Requires:
+ *   - UI with VITE_YACEWO_ROOMS_URL baked in (preview or YACEWO_URL)
+ *   - Rooms Worker reachable from the browser
+ *
+ * Usage:
+ *   YACEWO_URL=http://127.0.0.1:4173/yacewo/ node scripts/smoke-rejoin.mjs
+ *
+ * Optional: YACEWO_REJOIN_SIDE=guest|host (default guest) — who leaves and returns.
  */
 import { chromium } from "playwright";
 
 const BASE = process.env.YACEWO_URL ?? "http://127.0.0.1:4173/yacewo/";
+const SIDE = (process.env.YACEWO_REJOIN_SIDE ?? "guest").toLowerCase();
 
 async function waitEngine(page) {
   await page.waitForFunction(() => !!window.Yacewo, null, { timeout: 30000 });
   await page.waitForSelector(".landing, .lobby, .play", { timeout: 30000 });
 }
 
+async function roomCode(page) {
+  return page.evaluate(() => {
+    const m = location.search.match(/room=([2-9A-HJ-NP-Z]+)/i);
+    if (m) return m[1].toUpperCase();
+    const code = document.querySelector(".lobby-code")?.textContent?.trim();
+    return code ? code.toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "") : "";
+  });
+}
+
 async function main() {
+  if (!process.env.YACEWO_URL && !process.env.VITE_YACEWO_ROOMS_URL) {
+    console.error(
+      "Set YACEWO_URL to a UI build that has VITE_YACEWO_ROOMS_URL configured.\n" +
+        "Example: deploy yacewo-worker, then:\n" +
+        "  VITE_YACEWO_ROOMS_URL=https://…workers.dev npm run build\n" +
+        "  YACEWO_URL=http://127.0.0.1:4173/yacewo/ node scripts/smoke-rejoin.mjs",
+    );
+    process.exit(2);
+  }
+
   const browser = await chromium.launch();
   const hostCtx = await browser.newContext();
   const guestCtx = await browser.newContext();
@@ -23,6 +51,15 @@ async function main() {
     await waitEngine(host);
     await host.getByRole("button", { name: /Create Room/i }).click();
     await host.waitForSelector(".lobby-code, .lobby", { timeout: 30000 });
+
+    const createErr = await host.locator(".error-line").textContent().catch(() => "");
+    if (createErr && /VITE_YACEWO_ROOMS_URL|Remote rooms need/i.test(createErr)) {
+      throw new Error(
+        `UI is missing rooms URL: ${createErr.trim()}\n` +
+          "Rebuild with VITE_YACEWO_ROOMS_URL set to your Worker.",
+      );
+    }
+
     await host.waitForFunction(
       () => {
         const el =
@@ -35,12 +72,7 @@ async function main() {
       { timeout: 30000 },
     );
 
-    const room = await host.evaluate(() => {
-      const m = location.search.match(/room=([2-9A-HJ-NP-Z]+)/i);
-      if (m) return m[1].toUpperCase();
-      const code = document.querySelector(".lobby-code")?.textContent?.trim();
-      return code ? code.toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "") : "";
-    });
+    const room = await roomCode(host);
     if (!room || room.length < 4) throw new Error("Host did not get a room code");
     console.log("room", room);
 
@@ -63,11 +95,13 @@ async function main() {
     );
     const fenAfterMove = await host.locator(".fen-box").innerText();
     console.log("fen after move", fenAfterMove.trim());
-    console.log("moves", (await host.locator(".move-list").innerText()).trim());
 
-    // Guest leaves (navigate away for a cleaner data-channel close than page.close)
-    await guest.goto("about:blank");
-    const left = await host
+    const leaver = SIDE === "host" ? host : guest;
+    const stayer = SIDE === "host" ? guest : host;
+    const leaverCtx = SIDE === "host" ? hostCtx : guestCtx;
+
+    await leaver.goto("about:blank");
+    const left = await stayer
       .waitForFunction(
         () => {
           const banner = document.querySelector(".remote-banner")?.textContent || "";
@@ -75,7 +109,7 @@ async function main() {
           return (
             banner.includes("waiting for rejoin") ||
             err.includes("waiting to rejoin") ||
-            err.includes("Opponent disconnected")
+            err.includes("Opponent left")
           );
         },
         null,
@@ -83,67 +117,54 @@ async function main() {
       )
       .then(() => true)
       .catch(async () => {
-        const dump = await host.evaluate(() => ({
+        const dump = await stayer.evaluate(() => ({
           banner: document.querySelector(".remote-banner")?.textContent,
           err: document.querySelector(".error-line")?.textContent,
           status: document.querySelector(".status-turn")?.textContent,
           url: location.href,
         }));
-        console.error("host state after guest left", dump);
+        console.error("stayer state after leave", dump);
         return false;
       });
-    if (!left) throw new Error("Host did not notice guest disconnect");
-    const hostAfterLeft = await host.evaluate(() => ({
-      banner: document.querySelector(".remote-banner")?.textContent,
-      err: document.querySelector(".error-line")?.textContent,
-    }));
-    console.log("host after leave", hostAfterLeft);
-    if (
-      !(hostAfterLeft.banner || "").includes("waiting for rejoin") &&
-      !(hostAfterLeft.err || "").includes("waiting to rejoin")
-    ) {
-      throw new Error("Host tore down instead of waiting for rejoin");
-    }
-    console.log("host waiting for rejoin");
+    if (!left) throw new Error("Stayer did not notice opponent disconnect");
+    console.log(`${SIDE} left; other side waiting for rejoin`);
 
-    // Guest rejoins via same link
-    guest = await guestCtx.newPage();
-    await guest.goto(`${BASE}?room=${room}`);
-    await waitEngine(guest);
-    await guest.waitForSelector(".play", { timeout: 45000 });
-    await host.waitForFunction(
+    const rejoiner = await leaverCtx.newPage();
+    await rejoiner.goto(`${BASE}?room=${room}`);
+    await waitEngine(rejoiner);
+    await rejoiner.waitForSelector(".play", { timeout: 45000 });
+    await stayer.waitForFunction(
       () =>
-        document.querySelector(".net-status, .remote-banner") &&
         !(document.querySelector(".remote-banner")?.textContent || "").includes(
           "waiting for rejoin",
         ) &&
-        (document.querySelector(".error-line")?.textContent || "").trim() === "",
+        !(document.querySelector(".error-line")?.textContent || "").includes(
+          "waiting to rejoin",
+        ),
       null,
       { timeout: 45000 },
     );
 
-    const hostFen = (await host.locator(".fen-box").innerText()).trim();
-    const guestFen = (await guest.locator(".fen-box").innerText()).trim();
-    const guestBanner = await guest.locator(".remote-banner").innerText();
+    const stayerFen = (await stayer.locator(".fen-box").innerText()).trim();
+    const rejoinerFen = (await rejoiner.locator(".fen-box").innerText()).trim();
+    const rejoinerBanner = await rejoiner.locator(".remote-banner").innerText();
 
-    if (hostFen !== guestFen) {
-      throw new Error(`FEN mismatch host=${hostFen} guest=${guestFen}`);
+    if (stayerFen !== rejoinerFen) {
+      throw new Error(`FEN mismatch stayer=${stayerFen} rejoiner=${rejoinerFen}`);
     }
-    if (!hostFen.includes("b") && !/ b /.test(` ${hostFen} `)) {
-      // FEN side-to-move should be black after 1.e4
-      if (!hostFen.split(" ")[1]?.includes("b")) {
-        console.warn("unexpected side to move in", hostFen);
-      }
+    if (stayerFen !== fenAfterMove.trim()) {
+      throw new Error(
+        `Position reset on rejoin: was ${fenAfterMove.trim()} now ${stayerFen}`,
+      );
     }
-    if (!/black/i.test(guestBanner)) {
-      throw new Error(`Guest banner not Black: ${guestBanner}`);
-    }
-    if (hostFen !== fenAfterMove.trim()) {
-      throw new Error(`Position reset on rejoin: was ${fenAfterMove.trim()} now ${hostFen}`);
+
+    const expectColor = SIDE === "host" ? /white/i : /black/i;
+    if (!expectColor.test(rejoinerBanner)) {
+      throw new Error(`Rejoiner banner wrong color: ${rejoinerBanner}`);
     }
 
     console.log("OK — rejoined with matching FEN");
-    console.log("guest banner:", guestBanner.trim());
+    console.log("rejoiner banner:", rejoinerBanner.trim());
   } finally {
     await browser.close();
   }

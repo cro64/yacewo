@@ -1,0 +1,11 @@
+name = "yacewo-rooms"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[[durable_objects.bindings]]
+name = "CHESS_ROOM"
+class_name = "ChessRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChessRoom"]

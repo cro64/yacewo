@@ -32,10 +32,6 @@ type ActionMsg = Exclude<
   { type: "hello" } | { type: "ready" } | { type: "sync" }
 >;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 /** Text-presentation selector — keeps pieces monochrome so CSS color works on iOS. */
 const TEXT = "\uFE0E";
 
@@ -331,10 +327,8 @@ class App {
   /** Set in remote games; null means local hotseat. */
   private myColor: Color | null = null;
   private remoteSetup: GameSetup | null = null;
-  /** Guest mid-game reconnect in progress. */
+  /** Own transport reconnect in progress (NetSession owns the retries). */
   private reconnecting = false;
-  /** Bumps to cancel an in-flight guest rejoin loop (Quit / new session). */
-  private rejoinGeneration = 0;
   /** Which copy button briefly shows “Copied”. */
   private copiedFlash: "fen" | "moves" | "seed" | "room" | "room-link" | null =
     null;
@@ -470,8 +464,9 @@ class App {
     return this.lastMoves[this.lastMoves.length - 1] ?? null;
   }
 
+  /** Own WebSocket is up — opponent absence does not block sending moves. */
   private isNetLive(): boolean {
-    return this.netStatus.phase === "connected" && !!this.net?.isConnected();
+    return !!this.net?.isConnected();
   }
 
   private isMyTurn(): boolean {
@@ -562,11 +557,21 @@ class App {
                 seed: this.game.seed,
                 moveList: this.game.moveList,
               });
+              this.reconnecting = false;
               this.error = "";
               this.render();
             } else {
               this.net?.send({ type: "hello", setup: this.remoteSetup });
               this.beginRemoteGame(this.remoteSetup, "white");
+              // Seed DO storage so either side can rejoin before move 1.
+              if (this.game) {
+                this.net?.send({
+                  type: "sync",
+                  fen: this.game.fen,
+                  seed: this.game.seed,
+                  moveList: this.game.moveList,
+                });
+              }
             }
           } catch (err) {
             this.error = err instanceof Error ? err.message : String(err);
@@ -593,31 +598,37 @@ class App {
       },
       onSync: (msg) => this.applySync(msg),
       onAction: (msg) => this.applyRemoteAction(msg),
+      onPeerJoined: () => {
+        this.reconnecting = false;
+        if (this.error.startsWith("Opponent left")) this.error = "";
+        this.render();
+      },
       onPeerLeft: () => {
         this.clearSelection();
         this.pendingPromo = null;
-        if (this.screen === "play" && this.myColor === "white") {
+        if (this.screen === "play") {
           this.error = "Opponent left — waiting to rejoin";
         }
         this.render();
       },
+      onReconnecting: () => {
+        this.reconnecting = true;
+        this.error = "Reconnecting…";
+        this.render();
+      },
       onDisconnected: () => {
-        const room =
-          this.net?.getRoom() ||
-          this.remoteJoinCode ||
-          roomFromUrl();
-        const wasGuest = this.myColor === "black";
-        const stayPlay = this.screen === "play" && this.game != null;
-
-        if (wasGuest && room.length >= 4 && stayPlay) {
-          void this.rejoinAsGuest(room);
-          return;
-        }
-
         this.reconnecting = false;
-        this.error = "Opponent disconnected";
-        this.teardownRemote(true);
-        if (!stayPlay) this.screen = "landing";
+        this.error = "Could not reconnect — open the room link again";
+        const stayPlay = this.screen === "play" && this.game != null;
+        this.net?.destroy();
+        this.net = null;
+        this.netStatus = { phase: "idle" };
+        if (!stayPlay) {
+          this.myColor = null;
+          this.remoteSetup = null;
+          this.screen = "landing";
+          syncRoomInUrl(null);
+        }
         this.render();
       },
     });
@@ -657,7 +668,11 @@ class App {
       seed: msg.seed,
       moveList: msg.moveList || result.game.moveList,
     };
-    this.myColor = "black";
+    const role = msg.role ?? this.net?.getRole();
+    this.myColor = role === "host" ? "white" : "black";
+    if (role === "host" && !this.remoteSetup) {
+      this.remoteSetup = { kind: "fen", fen: msg.fen };
+    }
     this.reconnecting = false;
     this.clearMoveHighlights();
     this.setGame(game);
@@ -666,45 +681,7 @@ class App {
     this.render();
   }
 
-  private async rejoinAsGuest(room: string) {
-    const gen = ++this.rejoinGeneration;
-    this.remoteJoinCode = room;
-    syncRoomInUrl(room);
-    this.reconnecting = true;
-    this.error = "Reconnecting…";
-    this.render();
-
-    const delays = [400, 800, 1500, 2500, 4000];
-    for (let i = 0; i < delays.length; i++) {
-      if (gen !== this.rejoinGeneration || this.myColor !== "black") return;
-      try {
-        await this.ensureNet().joinRoom(room);
-        if (gen !== this.rejoinGeneration) return;
-        // Connected — wait for sync (or hello) via handlers.
-        this.error = "Reconnecting…";
-        this.render();
-        return;
-      } catch {
-        if (gen !== this.rejoinGeneration || this.myColor !== "black") return;
-        this.error = "Reconnecting…";
-        this.render();
-        await sleep(delays[i]!);
-      }
-    }
-
-    if (gen !== this.rejoinGeneration) return;
-    this.reconnecting = false;
-    this.error = "Could not rejoin — enter the room code again";
-    this.teardownRemote(true);
-    this.remoteJoinCode = room;
-    this.joinOpen = true;
-    syncRoomInUrl(room);
-    this.screen = this.game ? "play" : "landing";
-    this.render();
-  }
-
   private teardownRemote(destroyNet: boolean) {
-    this.rejoinGeneration += 1;
     this.reconnecting = false;
     this.myColor = null;
     this.remoteSetup = null;
@@ -718,8 +695,14 @@ class App {
 
   private sendAction(msg: ActionMsg) {
     if (!this.isRemote() || !this.net || !this.isNetLive()) return;
+    // Piggyback the post-move fen/moveList so a DO-backed transport (or any
+    // relay) can persist current state without re-deriving it — this.game
+    // already reflects the applied action by the time sendAction runs.
+    const withState: ActionMsg = this.game
+      ? { ...msg, state: { fen: this.game.fen, moveList: this.game.moveList } }
+      : msg;
     try {
-      this.net.send(msg);
+      this.net.send(withState);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     }
@@ -1520,7 +1503,7 @@ class App {
     const drawLocked =
       g.isOver || (this.isRemote() && !this.isMyTurn());
     const waitingRejoin =
-      this.isRemote() && this.netStatus.phase === "waiting" && this.myColor === "white";
+      this.isRemote() && this.netStatus.phase === "waiting" && this.screen === "play";
     const bannerSuffix = g.isOver
       ? ""
       : waitingRejoin

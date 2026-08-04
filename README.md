@@ -5,8 +5,8 @@
 [Play online →](https://cro64.github.io/yacewo/)
 
 Two-player chess in the browser or terminal — **Classical** openings, **Anarchy**
-seeded armies, **Chess960**, **Horde**, and **peer-to-peer rooms** you can share
-with a link.
+seeded armies, **Chess960**, **Horde**, and **shareable rooms** backed by a
+Cloudflare Durable Object (either player can refresh and rejoin).
 
 <p align="center">
   <img src="images/demo.gif" alt="YACEWO play demo" width="720" />
@@ -18,7 +18,7 @@ with a link.
 - **Anarchy** — seeded random armies (kings fixed); same seed → same position; shareable `?seed=…` links
 - **Chess960** — FIDE / Scharnagl IDs **0–959** (SP-518 = classical); share as `?mode=chess960&seed=…`
 - **Horde** — Lichess-style: White has 36 pawns (rank-1 may double-step); Black wins by wiping the horde; share as `?mode=horde`
-- **Remote play** — Create Room, share a link or code; guest auto-joins; host is White; guests rejoin after a drop
+- **Remote play** — Create Room, share a link or code; either player can rejoin after a drop; you can still move on your turn while the opponent is away
 - **Board prefs** — Last move highlights, Coords, and hotseat Auto-flip (all off by default); critical pieces tint when in check
 - **Hotseat** — local two-player on one device; Auto-flip keeps the side to move at the bottom
 - **FEN & Seed** — load positions (optional 7th-field seed / `960` / `horde` / `dk` / `dq`); one-click copy for FEN, moves, or seed/ID
@@ -79,10 +79,16 @@ Open `/yacewo/?mode=horde`.
 ### Remote rooms
 
 **Create Room** opens a lobby with a code and a shareable link
-(`?room=…`). Guests can paste a code on the landing page or open the link to
-auto-join. Setup (Classical, Anarchy seed, Chess960 ID, Horde, Queer, or FEN)
-is sent with the handshake. If a guest disconnects mid-game, the host waits and
-the guest can rejoin the same room.
+(`?room=…`). Guests paste the code or open the link to join. Host is White;
+guest is Black. Setup (Classical, Anarchy seed, Chess960 ID, Horde, Queer, or
+FEN) is sent with the handshake.
+
+Rooms are **not** peer-to-peer: state lives in a [Cloudflare Durable
+Object](yacewo-worker/) (`yacewo-rooms`). Either player can refresh or drop and
+rejoin with the same link — a per-browser identity token keeps host/guest
+roles stable. The side to move can still play while the opponent is away; the
+DO stores moves and syncs them on rejoin. Finished games expire after
+**15 minutes**, unfinished rooms after **24 hours** of inactivity.
 
 <p>
   <img src="images/remote-lobby.png" alt="Remote lobby — waiting for opponent with copy link" width="720" />
@@ -108,11 +114,44 @@ Open `/yacewo/?mode=dk` or `/yacewo/?mode=dq`.
 Live site: **[https://cro64.github.io/yacewo/](https://cro64.github.io/yacewo/)**
 
 ```sh
-make web          # js_of_ocaml bridge + static site → docs/
-make web-dev      # local Vite at /yacewo/
+make web          # js_of_ocaml bridge + static site → docs/ (GitHub Pages)
+make web-dev      # local Vite at http://localhost:5173/yacewo/
 ```
 
 Requires Node.js and `opam install js_of_ocaml js_of_ocaml-ppx`.
+
+### Remote rooms setup
+
+1. **Deploy the Worker** (once per Cloudflare account) — see
+   [yacewo-worker/README.md](yacewo-worker/README.md):
+
+   ```sh
+   cd yacewo-worker
+   npm install
+   npx wrangler login
+   npm run deploy
+   ```
+
+   Free-plan Durable Objects need `new_sqlite_classes` in `wrangler.toml`
+   (already set). Copy the printed URL, e.g.
+   `https://yacewo-rooms.<subdomain>.workers.dev`.
+
+2. **Point the UI at it** before building (Vite bakes the URL in at build time):
+
+   ```sh
+   # web/ui/.env.local — gitignored
+   VITE_YACEWO_ROOMS_URL=https://yacewo-rooms.<subdomain>.workers.dev
+   ```
+
+3. **Build / run**
+
+   ```sh
+   make web-dev   # local UI → live Worker; test join in an incognito window
+   make web       # writes docs/ for GitHub Pages — then commit & push docs/
+   ```
+
+   Two players need **separate browser profiles** (or incognito): the same
+   profile reuses the room identity token and cannot open two seats.
 
 Regenerate README screenshots / demo (with `make web-dev` or `vite preview` running):
 

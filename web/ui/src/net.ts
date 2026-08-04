@@ -1,5 +1,3 @@
-import Peer, { type DataConnection, type PeerError } from "peerjs";
-
 /** Alphabet without 0/O/1/I to keep room codes easy to read aloud. */
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
@@ -13,16 +11,28 @@ export type GameSetup =
   | { kind: "horde" }
   | { kind: "fen"; fen: string };
 
+// `state` is a lightweight fen/moveList snapshot piggybacked onto every
+// action so relays (e.g. the Cloudflare Worker/DO transport) can stay
+// current for reconnect-sync without running move validation themselves.
+// Receiving clients ignore it — they already recompute via api.applyMove().
+type ActionState = { fen: string; moveList: string };
+
 export type NetMsg =
   | { type: "hello"; setup: GameSetup }
   | { type: "ready" }
-  | { type: "sync"; fen: string; seed: number | null; moveList: string }
-  | { type: "move"; from: string; to: string; promo: string | null }
-  | { type: "castle"; side: string; from?: string }
-  | { type: "notation"; n: string }
-  | { type: "undo" }
-  | { type: "resign" }
-  | { type: "draw" };
+  | {
+      type: "sync";
+      fen: string;
+      seed: number | null;
+      moveList: string;
+      role?: NetRole;
+    }
+  | { type: "move"; from: string; to: string; promo: string | null; state?: ActionState }
+  | { type: "castle"; side: string; from?: string; state?: ActionState }
+  | { type: "notation"; n: string; state?: ActionState }
+  | { type: "undo"; state?: ActionState }
+  | { type: "resign"; state?: ActionState }
+  | { type: "draw"; state?: ActionState };
 
 export type NetRole = "host" | "guest";
 
@@ -45,10 +55,14 @@ export type NetHandlers = {
       { type: "hello" } | { type: "ready" } | { type: "sync" }
     >,
   ) => void;
-  /** Guest (or fatal) disconnect — tear down / retry at the app layer. */
+  /** Own socket failed after retries — tear down / retry at the app layer. */
   onDisconnected: () => void;
-  /** Host: opponent left but the room peer is still open for rejoin. */
+  /** Opponent left the room; DO still holds state for rejoin. */
   onPeerLeft: () => void;
+  /** Opponent (re)joined while we were waiting. */
+  onPeerJoined?: () => void;
+  /** Transport is retrying after a drop. */
+  onReconnecting?: () => void;
 };
 
 function randomRoomCode(len = 6): string {
@@ -64,24 +78,50 @@ function normalizeRoom(raw: string): string {
   return raw.trim().toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "");
 }
 
-type AnyPeerError = PeerError<string>;
-
-function isPeerError(err: unknown): err is AnyPeerError {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "type" in err &&
-    typeof (err as { type: unknown }).type === "string"
-  );
+function roomsBaseUrl(): string {
+  const raw = import.meta.env.VITE_YACEWO_ROOMS_URL as string | undefined;
+  if (!raw || !raw.trim()) {
+    throw new Error(
+      "Remote rooms need VITE_YACEWO_ROOMS_URL (deploy yacewo-worker, then set the Worker URL)",
+    );
+  }
+  return raw.trim().replace(/\/$/, "");
 }
 
+function tokenKey(room: string): string {
+  return `yacewo-token-${room}`;
+}
+
+function roomToken(room: string): string {
+  const key = tokenKey(room);
+  let token = localStorage.getItem(key);
+  if (!token) {
+    token = crypto.randomUUID();
+    localStorage.setItem(key, token);
+  }
+  return token;
+}
+
+function wsUrl(room: string, token: string): string {
+  let base = roomsBaseUrl();
+  if (/^https:/i.test(base)) base = base.replace(/^https:/i, "wss:");
+  else if (/^http:/i.test(base)) base = base.replace(/^http:/i, "ws:");
+  return `${base}/room/${encodeURIComponent(room)}?token=${encodeURIComponent(token)}`;
+}
+
+const RECONNECT_DELAYS_MS = [400, 800, 1500, 2500, 4000, 6000];
+
 export class NetSession {
-  private peer: Peer | null = null;
-  private conn: DataConnection | null = null;
+  private ws: WebSocket | null = null;
   private role: NetRole | null = null;
   private room = "";
   private disposed = false;
+  private intentionalClose = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: number | null = null;
   private handlers: NetHandlers;
+  /** True once the opponent has joined at least once this session. */
+  private sawPeer = false;
 
   constructor(handlers: NetHandlers) {
     this.handlers = handlers;
@@ -96,44 +136,34 @@ export class NetSession {
   }
 
   isConnected(): boolean {
-    return !!this.conn?.open;
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   async createRoom(): Promise<string> {
-    this.disposePeer();
+    this.teardownSocket(true);
     this.disposed = false;
+    this.intentionalClose = false;
+    this.sawPeer = false;
+    this.reconnectAttempt = 0;
+
+    roomsBaseUrl(); // fail fast if unset
+
+    const room = randomRoomCode();
+    this.room = room;
     this.role = "host";
+    this.handlers.onStatus({ phase: "creating", room });
 
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const room = randomRoomCode();
-      this.room = room;
-      this.handlers.onStatus({ phase: "creating", room });
-
-      try {
-        await this.openPeer(room);
-        this.handlers.onStatus({ phase: "waiting", room });
-        this.peer!.on("connection", (conn) => {
-          if (this.conn?.open) {
-            conn.close();
-            return;
-          }
-          this.detachConnection();
-          this.attachConnection(conn);
-        });
-        return room;
-      } catch (err) {
-        this.disposePeer();
-        if (isPeerError(err) && err.type === "unavailable-id") continue;
-        const message =
-          err instanceof Error ? err.message : "Could not create room";
-        this.handlers.onStatus({ phase: "error", message, room });
-        throw err;
-      }
+    try {
+      await this.openSocket(room);
+      this.handlers.onStatus({ phase: "waiting", room });
+      return room;
+    } catch (err) {
+      this.teardownSocket(true);
+      const message =
+        err instanceof Error ? err.message : "Could not create room";
+      this.handlers.onStatus({ phase: "error", message, room });
+      throw err;
     }
-
-    const message = "Could not reserve a room code — try again";
-    this.handlers.onStatus({ phase: "error", message });
-    throw new Error(message);
   }
 
   async joinRoom(rawRoom: string): Promise<void> {
@@ -144,19 +174,25 @@ export class NetSession {
       throw new Error(message);
     }
 
-    this.disposePeer();
+    this.teardownSocket(true);
     this.disposed = false;
-    this.role = "guest";
+    this.intentionalClose = false;
+    this.sawPeer = false;
+    this.reconnectAttempt = 0;
+    // Role comes from the DO (token identity) — a refreshing host rejoins via ?room=.
+    this.role = null;
     this.room = room;
     this.handlers.onStatus({ phase: "joining", room });
 
     try {
-      await this.openPeer();
-      const conn = this.peer!.connect(room, { reliable: true });
-      this.attachConnection(conn);
-      await this.waitOpen(conn);
+      await this.openSocket(room);
+      // Stay joining until peer_joined or sync/hello advances UI; if the
+      // host is already waiting we get peer_joined immediately.
+      if (!this.sawPeer) {
+        this.handlers.onStatus({ phase: "joining", room });
+      }
     } catch (err) {
-      this.disposePeer();
+      this.teardownSocket(true);
       const message =
         err instanceof Error ? err.message : "Could not join room";
       this.handlers.onStatus({ phase: "error", message, room });
@@ -165,147 +201,190 @@ export class NetSession {
   }
 
   send(msg: NetMsg): void {
-    if (!this.conn || !this.conn.open) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
-    this.conn.send(msg);
+    this.ws.send(JSON.stringify(msg));
   }
 
   destroy(): void {
     this.disposed = true;
-    this.disposePeer();
+    this.intentionalClose = true;
+    this.clearReconnectTimer();
+    this.teardownSocket(true);
     this.handlers.onStatus({ phase: "idle" });
   }
 
-  private openPeer(id?: string): Promise<Peer> {
-    return new Promise((resolve, reject) => {
-      const peer = id ? new Peer(id) : new Peer();
-      this.peer = peer;
+  private openSocket(room: string): Promise<void> {
+    const token = roomToken(room);
+    const url = wsUrl(room, token);
 
-      const onOpen = () => {
-        cleanup();
-        resolve(peer);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const ws = new WebSocket(url);
+      this.ws = ws;
+
+      const finishOk = () => {
+        if (settled) return;
+        settled = true;
+        this.reconnectAttempt = 0;
+        resolve();
       };
-      const onError = (err: AnyPeerError) => {
-        cleanup();
+      const finishErr = (err: Error) => {
+        if (settled) return;
+        settled = true;
         reject(err);
       };
-      const cleanup = () => {
-        peer.off("open", onOpen);
-        peer.off("error", onError);
-      };
 
-      peer.on("open", onOpen);
-      peer.on("error", onError);
+      ws.addEventListener("open", () => finishOk());
 
-      peer.on("disconnected", () => {
-        if (this.disposed) return;
-        try {
-          peer.reconnect();
-        } catch {
-          this.handlers.onDisconnected();
+      ws.addEventListener("message", (event) => {
+        this.handleRaw(String(event.data));
+      });
+
+      ws.addEventListener("close", () => {
+        if (this.ws === ws) this.ws = null;
+        if (this.disposed || this.intentionalClose) return;
+        if (!settled) {
+          finishErr(new Error("Connection closed before open"));
+          return;
+        }
+        this.scheduleReconnect();
+      });
+
+      ws.addEventListener("error", () => {
+        if (!settled) {
+          finishErr(new Error("WebSocket connection failed"));
         }
       });
     });
   }
 
-  private waitOpen(conn: DataConnection): Promise<void> {
-    if (conn.open) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        cleanup();
-        reject(new Error("Timed out waiting for host"));
-      }, 20000);
+  private scheduleReconnect(): void {
+    if (this.disposed || this.intentionalClose || !this.room) return;
+    this.clearReconnectTimer();
 
-      const onOpen = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = (err: unknown) => {
-        cleanup();
-        reject(err instanceof Error ? err : new Error("Connection failed"));
-      };
-      const cleanup = () => {
-        window.clearTimeout(timer);
-        conn.off("open", onOpen);
-        conn.off("error", onError);
-      };
+    const delay =
+      RECONNECT_DELAYS_MS[
+        Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+      ]!;
+    this.reconnectAttempt += 1;
+    this.handlers.onReconnecting?.();
 
-      conn.on("open", onOpen);
-      conn.on("error", onError);
-    });
-  }
-
-  private attachConnection(conn: DataConnection): void {
-    this.conn = conn;
-
-    const markConnected = () => {
-      if (!this.role) return;
-      this.handlers.onStatus({
-        phase: "connected",
-        room: this.room,
-        role: this.role,
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.disposed || this.intentionalClose || !this.room) return;
+      void this.openSocket(this.room).catch(() => {
+        if (this.reconnectAttempt >= RECONNECT_DELAYS_MS.length) {
+          this.handlers.onDisconnected();
+          return;
+        }
+        this.scheduleReconnect();
       });
-    };
-
-    if (conn.open) markConnected();
-    else conn.on("open", markConnected);
-
-    conn.on("data", (raw) => {
-      const msg = parseMsg(raw);
-      if (!msg) return;
-      if (msg.type === "hello") this.handlers.onHello(msg.setup);
-      else if (msg.type === "ready") this.handlers.onReady();
-      else if (msg.type === "sync") this.handlers.onSync(msg);
-      else this.handlers.onAction(msg);
-    });
-
-    conn.on("close", () => this.handleConnLost(conn));
-    conn.on("error", () => this.handleConnLost(conn));
+    }, delay);
   }
 
-  private handleConnLost(conn: DataConnection): void {
-    if (this.disposed) return;
-    if (this.conn !== conn) return;
-    this.detachConnection();
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer != null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
 
-    if (this.role === "host" && this.peer && !this.peer.destroyed) {
-      this.handlers.onStatus({ phase: "waiting", room: this.room });
+  private markConnected(): void {
+    if (!this.role || !this.room) return;
+    this.handlers.onStatus({
+      phase: "connected",
+      room: this.room,
+      role: this.role,
+    });
+  }
+
+  private handleRaw(raw: string): void {
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!data || typeof data !== "object") return;
+    const msg = data as Record<string, unknown>;
+
+    if (msg.type === "status") {
+      const role = parseRole(msg.role);
+      if (role) this.role = role;
+      if (msg.phase === "waiting" && this.role && this.room) {
+        // Host stays in lobby; guest stays joining until peer_joined.
+        if (this.role === "host" && !this.sawPeer) {
+          this.handlers.onStatus({ phase: "waiting", room: this.room });
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "peer_joined") {
+      this.sawPeer = true;
+      this.markConnected();
+      this.handlers.onPeerJoined?.();
+      return;
+    }
+
+    if (msg.type === "peer_left") {
+      this.sawPeer = false;
+      if (this.role && this.room) {
+        this.handlers.onStatus({ phase: "waiting", room: this.room });
+      }
       this.handlers.onPeerLeft();
       return;
     }
 
-    this.handlers.onDisconnected();
+    const netMsg = parseMsg(msg);
+    if (!netMsg) return;
+
+    if (netMsg.type === "sync") {
+      if (netMsg.role) this.role = netMsg.role;
+      this.sawPeer = true;
+      this.markConnected();
+      this.handlers.onSync(netMsg);
+      return;
+    }
+    if (netMsg.type === "hello") {
+      this.sawPeer = true;
+      this.markConnected();
+      this.handlers.onHello(netMsg.setup);
+      return;
+    }
+    if (netMsg.type === "ready") {
+      this.handlers.onReady();
+      return;
+    }
+    this.handlers.onAction(netMsg);
   }
 
-  /** Drop the data channel without destroying the PeerJS peer (host rejoin). */
-  private detachConnection(): void {
-    const conn = this.conn;
-    this.conn = null;
-    if (!conn) return;
-    try {
-      conn.close();
-    } catch {
-      /* ignore */
+  private teardownSocket(clearRoom: boolean): void {
+    this.clearReconnectTimer();
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
     }
-  }
-
-  private disposePeer(): void {
-    this.detachConnection();
-    try {
-      this.peer?.destroy();
-    } catch {
-      /* ignore */
+    if (clearRoom) {
+      this.role = null;
+      this.room = "";
+      this.sawPeer = false;
     }
-    this.peer = null;
-    this.role = null;
-    this.room = "";
   }
 }
 
-function parseMsg(raw: unknown): NetMsg | null {
-  if (!raw || typeof raw !== "object") return null;
-  const msg = raw as Record<string, unknown>;
+function parseRole(raw: unknown): NetRole | null {
+  return raw === "host" || raw === "guest" ? raw : null;
+}
+
+function parseMsg(msg: Record<string, unknown>): NetMsg | null {
   switch (msg.type) {
     case "hello": {
       const setup = parseSetup(msg.setup);
@@ -327,11 +406,13 @@ function parseMsg(raw: unknown): NetMsg | null {
         }
         seed = msg.seed;
       }
+      const role = parseRole(msg.role);
       return {
         type: "sync",
         fen: msg.fen.trim(),
         seed,
         moveList: msg.moveList,
+        ...(role ? { role } : {}),
       };
     }
     case "move":
