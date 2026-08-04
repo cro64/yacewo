@@ -850,10 +850,12 @@ class App {
     try {
       await this.ensureNet().joinRoom(code);
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       this.teardownRemote(true);
-      this.screen = "landing";
-      this.joinOpen = true;
+      // Stay on the lobby — bouncing to landing feels like a glitch.
+      this.netStatus = { phase: "error", message, room: code };
+      this.screen = "lobby";
+      this.error = "";
       this.render();
     }
   }
@@ -1298,6 +1300,8 @@ class App {
       (st.phase === "error" && st.room)
         ? st.room ?? ""
         : "";
+    const invalidRoom =
+      st.phase === "error" && /room not found/i.test(st.message);
     let headline = "Remote";
     let detail = "";
     if (st.phase === "creating") {
@@ -1313,8 +1317,8 @@ class App {
       headline = "Connected";
       detail = room;
     } else if (st.phase === "error") {
-      headline = "Could not connect";
-      detail = st.message;
+      headline = invalidRoom ? "Invalid Room Code" : "Could not connect";
+      detail = invalidRoom ? "" : st.message;
     }
     return `
       ${this.renderTopbar(true)}
@@ -1322,7 +1326,7 @@ class App {
         <div class="lobby-wash" aria-hidden="true"></div>
         <section class="lobby-card">
           <p class="lobby-kicker">Remote</p>
-          <h1>${escapeHtml(headline)}</h1>
+          <h1${invalidRoom ? ' class="lobby-invalid"' : ""}>${escapeHtml(headline)}</h1>
           ${
             room && st.phase !== "error"
               ? `<div class="lobby-code" aria-label="Room code">${escapeHtml(room)}</div>
@@ -1343,12 +1347,14 @@ class App {
                              ? " Horde."
                              : ""
                  }</p>`
-              : st.phase === "error"
+              : st.phase === "error" && detail
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
                 : ""
           }
           ${this.error ? `<div class="error-line">${escapeHtml(this.error)}</div>` : ""}
-          <button type="button" class="text-btn" data-action="cancel-remote">Cancel</button>
+          <button type="button" class="text-btn" data-action="cancel-remote">${
+            st.phase === "error" ? "Return" : "Cancel"
+          }</button>
         </section>
       </main>
     `;

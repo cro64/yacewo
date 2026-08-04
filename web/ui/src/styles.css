@@ -1266,6 +1266,10 @@ html[data-theme="dark"] .primary-btn {
   line-height: 1.15;
 }
 
+.lobby-card h1.lobby-invalid {
+  color: var(--danger);
+}
+
 .lobby-code {
   margin-top: 0.35rem;
   font-family: var(--font-mono);
