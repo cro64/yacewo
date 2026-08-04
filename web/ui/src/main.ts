@@ -1123,6 +1123,7 @@ class App {
   }
 
   private onSquareClick(alg: string) {
+    unlockAudio();
     if (!this.game || this.game.isOver || !this.isMyTurn()) return;
     const idx = this.game.board.findIndex((_, i) => fileRank(i).alg === alg);
     const piece = idx >= 0 ? this.game.board[idx] : null;
@@ -1820,6 +1821,7 @@ class App {
     });
 
     this.root.querySelector("[data-action='theme']")?.addEventListener("click", () => {
+      unlockAudio();
       this.theme = cycleTheme(this.theme);
       storeTheme(this.theme);
       applyTheme(this.theme);
@@ -1838,6 +1840,7 @@ class App {
 
     this.root.querySelectorAll("[data-mode]").forEach((el) => {
       el.addEventListener("click", () => {
+        unlockAudio();
         const raw = (el as HTMLElement).dataset.mode;
         const next: GameMode =
           raw === "anarchy"
@@ -2019,6 +2022,7 @@ class App {
     });
 
     this.root.querySelector("[data-action='start']")?.addEventListener("click", () => {
+      unlockAudio();
       this.error = "";
       if (this.mode === "classical") {
         this.playMode = "classical";

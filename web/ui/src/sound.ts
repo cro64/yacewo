@@ -30,11 +30,32 @@ export type Sfx =
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-let resumeChain: Promise<void> | null = null;
 let gestureUnlockInstalled = false;
+let iosUnlocked = false;
+let pending: Sfx[] = [];
+/** Looping silent <audio> forces iOS onto the media channel (ignores ringer switch). */
+let silentEl: HTMLAudioElement | null = null;
+
+/**
+ * Short silent WAV (feross/unmute-ios-audio style). Sample-rate digits are
+ * filled so WebKit treats it as a valid media file.
+ */
+function silentWavDataUri(sampleRate = 44100): string {
+  const buf = new ArrayBuffer(10);
+  const view = new DataView(buf);
+  view.setUint32(0, sampleRate, true);
+  view.setUint32(4, sampleRate, true);
+  view.setUint16(8, 1, true);
+  const mid = btoa(String.fromCharCode(...new Uint8Array(buf))).slice(0, 13);
+  return `data:audio/wav;base64,UklGRisAAABXQVZFZm10IBAAAAABAAEA${mid}AgAZGF0YQcAAACAgICAgICAAAA=`;
+}
 
 function loadMuted(): boolean {
-  return localStorage.getItem(KEY) === "off";
+  try {
+    return localStorage.getItem(KEY) === "off";
+  } catch {
+    return false;
+  }
 }
 
 let muted = loadMuted();
@@ -45,7 +66,12 @@ export function isSoundOn(): boolean {
 
 export function setSoundOn(on: boolean) {
   muted = !on;
-  localStorage.setItem(KEY, on ? "on" : "off");
+  try {
+    localStorage.setItem(KEY, on ? "on" : "off");
+  } catch {
+    /* ignore */
+  }
+  if (muted) stopSilentHtml();
 }
 
 export function toggleSound(): boolean {
@@ -57,82 +83,197 @@ export function soundLabel(on = isSoundOn()): string {
   return on ? "Sound" : "Muted";
 }
 
+function audioContextCtor(): (typeof AudioContext) | null {
+  if (typeof window === "undefined") return null;
+  return (
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext ||
+    null
+  );
+}
+
+/** Safari 16.4+: treat page audio as media, not ringer/ambient. */
+function forcePlaybackSession() {
+  try {
+    const session = (
+      navigator as Navigator & { audioSession?: { type: string } }
+    ).audioSession;
+    if (session) session.type = "playback";
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * iOS: a context created outside a gesture can stay permanently suspended.
+ * Only call this from a synchronous user-gesture handler.
+ */
 function ensureCtx(): AudioContext | null {
   if (muted || typeof window === "undefined") return null;
   if (!ctx) {
+    const AC = audioContextCtor();
+    if (!AC) return null;
     try {
-      const AC =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
+      forcePlaybackSession();
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.55;
+      // Louder master — previous ~0.55 × soft gains was near-inaudible on phones.
+      master.gain.value = 0.9;
       master.connect(ctx.destination);
+      ctx.addEventListener("statechange", flushPending);
     } catch {
+      ctx = null;
+      master = null;
       return null;
     }
   }
   return ctx;
 }
 
-/** Near-silent start inside a gesture — required to unlock iOS Safari. */
-function kickSilent(c: AudioContext) {
+/** Howler / iOS9 classic: empty buffer start inside the gesture. */
+function kickBuffer(c: AudioContext) {
   try {
-    const osc = c.createOscillator();
-    const g = c.createGain();
-    g.gain.value = 0.0001;
-    osc.connect(g);
-    g.connect(c.destination);
-    osc.start(0);
-    osc.stop(c.currentTime + 0.001);
+    const buffer = c.createBuffer(1, 1, 22050);
+    const source = c.createBufferSource();
+    source.buffer = buffer;
+    source.connect(c.destination);
+    source.start(0);
   } catch {
     /* ignore */
   }
 }
 
-function resumeCtx(c: AudioContext): Promise<void> {
-  if (c.state === "running") return Promise.resolve();
-  if (!resumeChain) {
-    resumeChain = c
-      .resume()
-      .catch(() => undefined)
-      .then(() => {
-        resumeChain = null;
-      });
+function stopSilentHtml() {
+  if (!silentEl) return;
+  try {
+    silentEl.pause();
+    silentEl.removeAttribute("src");
+    silentEl.load();
+  } catch {
+    /* ignore */
   }
-  return resumeChain;
+  silentEl = null;
 }
 
 /**
- * Call from a user gesture so autoplay policies unlock audio.
- * iOS needs both resume() and a synchronous oscillator/buffer start.
+ * Keep a looping silent HTMLAudioElement playing. On iOS this moves Web Audio
+ * onto the media category so the hardware mute switch does not silence SFX.
+ * @see https://github.com/feross/unmute-ios-audio
+ * @see https://stackoverflow.com/questions/40789136/ios-ringer-switch-mutes-web-audio
  */
-export function unlockAudio() {
-  const c = ensureCtx();
-  if (!c) return;
-  kickSilent(c);
-  void resumeCtx(c);
+function ensureSilentHtml(sampleRate: number) {
+  if (silentEl) {
+    if (silentEl.paused) void silentEl.play().catch(() => undefined);
+    return;
+  }
+  try {
+    const a = document.createElement("audio");
+    a.setAttribute("x-webkit-airplay", "deny");
+    a.preload = "auto";
+    a.loop = true;
+    a.volume = 0.01;
+    a.src = silentWavDataUri(sampleRate);
+    a.load();
+    silentEl = a;
+    void a.play().catch(() => {
+      stopSilentHtml();
+    });
+  } catch {
+    silentEl = null;
+  }
 }
 
-/** First tap/click anywhere unlocks Web Audio on mobile browsers. */
+/**
+ * Throwaway context resume flips iOS's "gesture succeeded" flag so later
+ * AudioContexts can run.
+ * @see https://js2devlog.com/en/devlog/ios-safari-audio-unlock
+ */
+function kickDummyContext() {
+  const AC = audioContextCtor();
+  if (!AC) return;
+  try {
+    const u = new AC();
+    const done = () => {
+      try {
+        void u.close();
+      } catch {
+        /* ignore */
+      }
+    };
+    if (u.state === "running") {
+      done();
+      return;
+    }
+    void u.resume().then(done, done);
+  } catch {
+    /* ignore */
+  }
+}
+
+function flushPending() {
+  if (!ctx || ctx.state !== "running" || muted) return;
+  const queue = pending;
+  pending = [];
+  for (const sfx of queue) playSfx(ctx, sfx);
+}
+
+/**
+ * Must run synchronously at the top of a user-gesture callback on iOS.
+ * Creating AudioContext outside a gesture can leave it unresumable forever.
+ */
+export function unlockAudio() {
+  if (muted || typeof window === "undefined") return;
+  forcePlaybackSession();
+  // Order matters: dummy unlock first, then real ctx + buffer + HTML audio.
+  kickDummyContext();
+  const c = ensureCtx();
+  if (!c) return;
+  ensureSilentHtml(c.sampleRate || 44100);
+  kickBuffer(c);
+  if (c.state === "suspended" || (c.state as string) === "interrupted") {
+    void c.resume().then(() => {
+      if (c.state === "running") iosUnlocked = true;
+      flushPending();
+    }, () => undefined);
+  } else if (c.state === "running") {
+    iosUnlocked = true;
+    flushPending();
+  }
+}
+
+/** First tap anywhere — touchstart/touchend are most reliable on iOS. */
 export function installGestureUnlock() {
   if (gestureUnlockInstalled || typeof window === "undefined") return;
   gestureUnlockInstalled = true;
   const opts: AddEventListenerOptions = { capture: true, passive: true };
   const onGesture = () => {
     unlockAudio();
-    if (ctx?.state === "running") {
-      window.removeEventListener("pointerdown", onGesture, opts);
+    if (iosUnlocked || ctx?.state === "running") {
       window.removeEventListener("touchstart", onGesture, opts);
+      window.removeEventListener("touchend", onGesture, opts);
+      window.removeEventListener("pointerup", onGesture, opts);
       window.removeEventListener("click", onGesture, opts);
       window.removeEventListener("keydown", onGesture, opts);
     }
   };
-  window.addEventListener("pointerdown", onGesture, opts);
   window.addEventListener("touchstart", onGesture, opts);
+  window.addEventListener("touchend", onGesture, opts);
+  window.addEventListener("pointerup", onGesture, opts);
   window.addEventListener("click", onGesture, opts);
   window.addEventListener("keydown", onGesture, opts);
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      // Drop silent media so iOS does not keep a Now Playing widget.
+      stopSilentHtml();
+      return;
+    }
+    if (!ctx) return;
+    if (ctx.state === "suspended" || (ctx.state as string) === "interrupted") {
+      void ctx.resume().then(flushPending, () => undefined);
+    }
+  });
 }
 
 installGestureUnlock();
@@ -224,40 +365,42 @@ function wood(
 }
 
 export function play(sfx: Sfx) {
-  const c = ensureCtx();
-  if (!c) return;
+  if (muted) return;
 
-  const run = () => {
-    if (c.state !== "running") return;
-    playSfx(c, sfx);
-  };
-
-  if (c.state === "running") {
-    run();
+  // Never create AudioContext here — on iOS a context created outside a
+  // user gesture can stay permanently suspended. Gesture unlock owns create.
+  if (!ctx) {
+    pending.push(sfx);
     return;
   }
 
-  // First interaction on mobile: unlock then play once the context is running.
-  kickSilent(c);
-  void resumeCtx(c).then(run);
+  if (ctx.state === "running") {
+    playSfx(ctx, sfx);
+    return;
+  }
+
+  pending.push(sfx);
+  if (ctx.state === "suspended" || (ctx.state as string) === "interrupted") {
+    void ctx.resume().then(flushPending, () => undefined);
+  }
 }
 
 function playSfx(c: AudioContext, sfx: Sfx) {
   switch (sfx) {
     case "select":
-      wood(c, { duration: 0.028, gain: 0.035, freq: 1100, q: 1.4 });
-      tone(c, { freq: 620, duration: 0.05, type: "triangle", gain: 0.028 });
+      wood(c, { duration: 0.028, gain: 0.08, freq: 1100, q: 1.4 });
+      tone(c, { freq: 620, duration: 0.05, type: "triangle", gain: 0.06 });
       break;
     case "deselect":
-      wood(c, { duration: 0.022, gain: 0.025, freq: 900, q: 1.2 });
+      wood(c, { duration: 0.022, gain: 0.06, freq: 900, q: 1.2 });
       break;
     case "move":
-      wood(c, { duration: 0.05, gain: 0.06, freq: 480, q: 0.9 });
+      wood(c, { duration: 0.05, gain: 0.12, freq: 480, q: 0.9 });
       tone(c, {
         freq: 180,
         duration: 0.09,
         type: "sine",
-        gain: 0.045,
+        gain: 0.09,
         attack: 0.002,
       });
       break;
@@ -386,27 +529,27 @@ function playSfx(c: AudioContext, sfx: Sfx) {
       });
       break;
     case "ui":
-      wood(c, { duration: 0.02, gain: 0.022, freq: 1400, q: 1.8 });
+      wood(c, { duration: 0.02, gain: 0.06, freq: 1400, q: 1.8 });
       break;
     case "mode":
-      wood(c, { duration: 0.028, gain: 0.038, freq: 980, q: 1.3 });
+      wood(c, { duration: 0.028, gain: 0.09, freq: 980, q: 1.3 });
       tone(c, {
         freq: 520,
         duration: 0.07,
         type: "triangle",
-        gain: 0.028,
+        gain: 0.07,
       });
       break;
     case "start":
-      tone(c, { freq: 330, duration: 0.14, type: "sine", gain: 0.04 });
+      tone(c, { freq: 330, duration: 0.14, type: "sine", gain: 0.09 });
       tone(c, {
         freq: 440,
         duration: 0.18,
         type: "triangle",
-        gain: 0.04,
+        gain: 0.09,
         delay: 0.07,
       });
-      wood(c, { duration: 0.04, gain: 0.035, freq: 700, delay: 0.04 });
+      wood(c, { duration: 0.04, gain: 0.08, freq: 700, delay: 0.04 });
       break;
     case "copy":
       tone(c, { freq: 720, duration: 0.06, type: "sine", gain: 0.03 });
