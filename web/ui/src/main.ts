@@ -196,6 +196,27 @@ function queerVariantFromFen(fen: string): QueerVariant | null {
   return null;
 }
 
+/** Strip move numbers from a Game_engine.move_list string → SAN tokens. */
+function sanTokensFromMoveList(moveList: string): string[] {
+  return moveList
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !/^\d+\.+$/.test(t));
+}
+
+function playModeFromFen(
+  fen: string,
+  seed: number | null,
+): { mode: GameMode; queer?: QueerVariant } {
+  const queer = queerVariantFromFen(fen);
+  if (queer) return { mode: "queer", queer };
+  if (fen.includes("horde")) return { mode: "horde" };
+  if (seed != null) {
+    return { mode: fen.includes("960") ? "chess960" : "anarchy" };
+  }
+  return { mode: "classical" };
+}
+
 function parseSeededInput(
   trimmed: string,
   mode: SeededMode,
@@ -565,6 +586,7 @@ class App {
                 fen: this.game.fen,
                 seed: this.game.seed,
                 moveList: this.game.moveList,
+                setup: this.remoteSetup,
               });
               this.reconnecting = false;
               this.error = "";
@@ -579,6 +601,7 @@ class App {
                   fen: this.game.fen,
                   seed: this.game.seed,
                   moveList: this.game.moveList,
+                  setup: this.remoteSetup,
                 });
               }
             }
@@ -654,9 +677,7 @@ class App {
       this.render();
       return;
     }
-    this.remoteSetup = setup;
-    this.playMode = playModeFromSetup(setup);
-    if (setup.kind === "queer") this.queerVariant = setup.variant;
+    this.applyRemoteSetup(setup);
     play(setup.kind === "queer" ? "queer" : "start");
     this.myColor = color;
     this.reconnecting = false;
@@ -667,23 +688,79 @@ class App {
     this.render();
   }
 
-  private applySync(msg: Extract<NetMsg, { type: "sync" }>) {
-    const result = this.api.ofFen(msg.fen);
-    if (!result.ok || !result.game) {
-      this.error = result.error ?? "Could not sync position";
-      this.render();
+  /** Restore mode / queer variant from a persisted GameSetup (or FEN tags). */
+  private applyRemoteSetup(setup: GameSetup, seed: number | null = null) {
+    this.remoteSetup = setup;
+    if (setup.kind === "fen") {
+      const inferred = playModeFromFen(setup.fen, seed);
+      this.playMode = inferred.mode;
+      if (inferred.queer) this.queerVariant = inferred.queer;
       return;
     }
-    const game: GameSnapshot = {
-      ...result.game,
-      seed: msg.seed,
-      moveList: msg.moveList || result.game.moveList,
-    };
+    this.playMode = playModeFromSetup(setup);
+    if (setup.kind === "queer") this.queerVariant = setup.variant;
+  }
+
+  /**
+   * Rebuild engine state from setup + SAN list so plies survive reconnect.
+   * `ofFen` alone wipes history and would truncate moveList on the next ply.
+   */
+  private replayFromSetup(setup: GameSetup, moveList: string): EngineResult {
+    let result = this.applySetup(setup);
+    if (!result.ok || !result.game) return result;
+    for (const san of sanTokensFromMoveList(moveList)) {
+      result = this.api.applyNotation(san);
+      if (!result.ok || !result.game) return result;
+    }
+    return result;
+  }
+
+  private applySync(msg: Extract<NetMsg, { type: "sync" }>) {
+    const setup = msg.setup ?? this.remoteSetup;
+    let game: GameSnapshot | null = null;
+
+    if (setup) {
+      const replayed = this.replayFromSetup(setup, msg.moveList);
+      if (
+        replayed.ok &&
+        replayed.game &&
+        replayed.game.fen.trim() === msg.fen.trim()
+      ) {
+        game = replayed.game;
+        if (msg.seed != null && game.seed == null) {
+          game = { ...game, seed: msg.seed };
+        }
+      }
+    }
+
+    if (!game) {
+      const loaded = this.api.ofFen(msg.fen);
+      if (!loaded.ok || !loaded.game) {
+        this.error = loaded.error ?? "Could not sync position";
+        this.render();
+        return;
+      }
+      game = {
+        ...loaded.game,
+        seed: msg.seed ?? loaded.game.seed,
+        moveList: msg.moveList || loaded.game.moveList,
+      };
+    }
+
     const role = msg.role ?? this.net?.getRole();
     this.myColor = role === "host" ? "white" : "black";
-    if (role === "host" && !this.remoteSetup) {
-      this.remoteSetup = { kind: "fen", fen: msg.fen };
+
+    if (setup) {
+      this.applyRemoteSetup(setup, game.seed);
+    } else {
+      const inferred = playModeFromFen(msg.fen, msg.seed ?? game.seed);
+      this.playMode = inferred.mode;
+      if (inferred.queer) this.queerVariant = inferred.queer;
+      if (role === "host" && !this.remoteSetup) {
+        this.remoteSetup = { kind: "fen", fen: msg.fen };
+      }
     }
+
     this.reconnecting = false;
     this.clearMoveHighlights();
     this.setGame(game);

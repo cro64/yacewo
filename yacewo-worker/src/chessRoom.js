@@ -76,6 +76,7 @@ function applyMessage(room, msg) {
       room.fen = msg.fen;
       room.seed = msg.seed ?? null;
       room.moveList = msg.moveList ?? room.moveList;
+      if (msg.setup) room.setup = msg.setup;
       if (room.setup || room.fen) room.status = "active";
       return true;
     case "move":
@@ -210,6 +211,7 @@ export class ChessRoom {
         fen: room.fen,
         seed: room.seed,
         moveList: room.moveList,
+        ...(room.setup ? { setup: room.setup } : {}),
         role,
       });
       return;

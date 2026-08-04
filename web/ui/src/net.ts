@@ -27,6 +27,8 @@ export type NetMsg =
       fen: string;
       seed: number | null;
       moveList: string;
+      /** Present on DO catch-up so rejoins restore mode (not only FEN). */
+      setup?: GameSetup;
       role?: NetRole;
     }
   | { type: "move"; from: string; to: string; promo: string | null; state?: ActionState }
@@ -469,11 +471,13 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
         seed = msg.seed;
       }
       const role = parseRole(msg.role);
+      const setup = msg.setup != null ? parseSetup(msg.setup) : null;
       return {
         type: "sync",
         fen: msg.fen.trim(),
         seed,
         moveList: msg.moveList,
+        ...(setup ? { setup } : {}),
         ...(role ? { role } : {}),
       };
     }

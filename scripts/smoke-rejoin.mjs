@@ -94,7 +94,9 @@ async function main() {
       { timeout: 15000 },
     );
     const fenAfterMove = await host.locator(".fen-box").innerText();
+    const movesAfterMove = (await host.locator(".move-list").innerText()).trim();
     console.log("fen after move", fenAfterMove.trim());
+    console.log("moves after move", movesAfterMove);
 
     const leaver = SIDE === "host" ? host : guest;
     const stayer = SIDE === "host" ? guest : host;
@@ -148,6 +150,10 @@ async function main() {
     const stayerFen = (await stayer.locator(".fen-box").innerText()).trim();
     const rejoinerFen = (await rejoiner.locator(".fen-box").innerText()).trim();
     const rejoinerBanner = await rejoiner.locator(".remote-banner").innerText();
+    const rejoinerMoves = (await rejoiner.locator(".move-list").innerText()).trim();
+    const rejoinerMode = (
+      await rejoiner.locator(".status-meta").innerText().catch(() => "")
+    ).trim();
 
     if (stayerFen !== rejoinerFen) {
       throw new Error(`FEN mismatch stayer=${stayerFen} rejoiner=${rejoinerFen}`);
@@ -157,14 +163,38 @@ async function main() {
         `Position reset on rejoin: was ${fenAfterMove.trim()} now ${stayerFen}`,
       );
     }
+    if (!/e4/.test(rejoinerMoves)) {
+      throw new Error(`Move list lost on rejoin: ${rejoinerMoves}`);
+    }
+    if (rejoinerMode && !/classical/i.test(rejoinerMode)) {
+      throw new Error(`Mode lost on rejoin: ${rejoinerMode}`);
+    }
 
     const expectColor = SIDE === "host" ? /white/i : /black/i;
     if (!expectColor.test(rejoinerBanner)) {
       throw new Error(`Rejoiner banner wrong color: ${rejoinerBanner}`);
     }
 
-    console.log("OK — rejoined with matching FEN");
+    // Next ply must append, not replace, the move list (engine history restored).
+    const blackToMove = SIDE === "guest";
+    const mover = blackToMove ? rejoiner : stayer;
+    await mover.locator('[data-sq="e7"]').click();
+    await mover.locator('[data-sq="e5"]').click();
+    await mover.waitForFunction(
+      () => /e5/.test(document.querySelector(".move-list")?.textContent || ""),
+      null,
+      { timeout: 15000 },
+    );
+    const movesAfterRejoin = (await mover.locator(".move-list").innerText()).trim();
+    if (!/e4/.test(movesAfterRejoin) || !/e5/.test(movesAfterRejoin)) {
+      throw new Error(
+        `Move list truncated after post-rejoin ply: ${movesAfterRejoin}`,
+      );
+    }
+
+    console.log("OK — rejoined with matching FEN, mode, and moves");
     console.log("rejoiner banner:", rejoinerBanner.trim());
+    console.log("moves after rejoin ply:", movesAfterRejoin);
   } finally {
     await browser.close();
   }
