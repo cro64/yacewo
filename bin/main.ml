@@ -83,6 +83,7 @@ let mode_label = function
   | `Chess960 -> "Chess960"
   | `Queer `TwoKings -> "Queer Chess — Double Kings"
   | `Queer `TwoQueens -> "Queer Chess — Double Queens"
+  | `Horde -> "Horde"
 
 let print_mode_banner mode game =
   ANSITerminal.print_string [ ANSITerminal.yellow ]
@@ -108,6 +109,10 @@ let print_mode_banner mode game =
          and d/f."
   | `Anarchy ->
       print_endline " Seeded random armies; kings fixed on e1/e8."
+  | `Horde ->
+      print_endline
+        " White: 36 pawns (rank-1 may double-step, no e.p.). Black wins by \
+         capturing all white pieces; White wins by checkmate."
   | `Classical -> ()
 
 let starts_with prefix s =
@@ -161,6 +166,7 @@ let fen_load_note game =
           "Loaded Double Kings position from FEN (dk)."
       | { castling = Flexible; critical = Queen; _ } ->
           "Loaded Double Queens position from FEN (dq)."
+      | { horde = true; _ } -> "Loaded Horde position from FEN."
       | _ -> "Loaded position from FEN.")
 
 let rec playing_game game =
@@ -240,7 +246,8 @@ let play_mode_print () =
   print_endline " 2. Anarchy Chess";
   print_endline " 3. Chess960";
   print_endline " 4. Queer Chess — Double Kings";
-  print_endline " 5. Queer Chess — Double Queens \n"
+  print_endline " 5. Queer Chess — Double Queens";
+  print_endline " 6. Horde \n"
 
 let mode_of_input input =
   match String.lowercase_ascii (String.trim input) with
@@ -249,6 +256,7 @@ let mode_of_input input =
   | "3" | "chess960" -> `Chess960
   | "4" | "queer chess" | "queer" | "double kings" | "dk" -> `Queer `TwoKings
   | "5" | "double queens" | "dq" -> `Queer `TwoQueens
+  | "6" | "horde" -> `Horde
   | _ -> raise PlayModeSelectionError
 
 let rec play_mode () =
@@ -264,7 +272,7 @@ let main () =
   let mode = play_mode () in
   let game =
     match mode with
-    | `Classical -> create `Classical
+    | `Classical | `Horde -> create mode
     | `Queer _ as m -> create m
     | (`Anarchy | `Chess960) as m ->
         let seed =

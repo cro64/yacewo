@@ -2,7 +2,7 @@
 
     Standard six fields, plus optional trailing fields:
     - layout seed (Anarchy / Chess960)
-    - variant tags [dk] / [dq] / [960]
+    - variant tags [dk] / [dq] / [960] / [horde]
     Formats: six fields; six + seed|tag; six + tag + seed.
 
     Chess960 does not use Shredder/X-FEN. Castling field is typically [-];
@@ -84,7 +84,8 @@ let variant_tag (pos : Position.t) =
       | King -> Some "dk"
       | _ -> None)
   | Chess960 -> Some "960"
-  | Standard | Disabled -> None
+  | Standard | Disabled ->
+      if pos.rules.horde then Some "horde" else None
 
 let to_fen ?seed (pos : Position.t) =
   let turn = match pos.turn with White -> "w" | Black -> "b" in
@@ -233,6 +234,7 @@ let parse_extra_tag = function
   | "dk" -> Some (Position.rules_double_kings, None)
   | "dq" -> Some (Position.rules_double_queens, None)
   | "960" -> Some (Position.rules_chess960, None)
+  | "horde" -> Some (Position.rules_horde, None)
   | _ -> None
 
 let of_fen input =

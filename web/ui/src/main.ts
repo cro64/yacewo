@@ -167,7 +167,7 @@ function syncRoomInUrl(room: string | null) {
 }
 
 type SeededMode = "anarchy" | "chess960";
-type GameMode = "classical" | SeededMode | "queer";
+type GameMode = "classical" | SeededMode | "queer" | "horde";
 
 /** Match OCaml [Setup.chess960_id]: any int → [0, 959]. */
 function normalizeChess960Id(n: number): number {
@@ -237,6 +237,18 @@ function syncQueerInUrl(variant: QueerVariant) {
   });
 }
 
+function syncHordeInUrl() {
+  replaceSearchParams((params) => {
+    params.delete("room");
+    params.delete("seed");
+    params.set("mode", "horde");
+  });
+}
+
+function hordeFromUrl(): boolean {
+  return new URLSearchParams(location.search).get("mode") === "horde";
+}
+
 function roomFromUrl(): string {
   return normalizeRoom(new URLSearchParams(location.search).get("room") ?? "");
 }
@@ -254,8 +266,8 @@ function isQueerUnlocked(): boolean {
 }
 
 function seedFromUrl(): number | null {
-  // Queer share links use mode=dk|dq and should not open the seed ritual.
-  if (queerFromUrl() != null) return null;
+  // Variant share links should not open the seed ritual.
+  if (queerFromUrl() != null || hordeFromUrl()) return null;
   const raw = new URLSearchParams(location.search).get("seed");
   if (raw == null || raw.trim() === "") return null;
   const n = Number(raw);
@@ -472,6 +484,10 @@ class App {
       return { kind: "queer", variant: this.queerVariant };
     }
 
+    if (this.mode === "horde") {
+      return { kind: "horde" };
+    }
+
     const trimmed = this.seedInput.trim();
     if (this.mode === "classical" && trimmed === "") {
       return { kind: "classical" };
@@ -508,6 +524,8 @@ class App {
         return this.api.createChess960(setup.seed);
       case "queer":
         return this.api.createQueer(setup.variant);
+      case "horde":
+        return this.api.createHorde();
       case "fen":
         return this.api.ofFen(setup.fen);
     }
@@ -815,6 +833,8 @@ class App {
       const linkQueer = queerFromUrl();
       if (linkQueer != null) {
         this.applyQueerFromLink(linkQueer);
+      } else if (hordeFromUrl()) {
+        this.applyHordeFromLink();
       } else {
         const linkSeed = seedFromUrl();
         if (linkSeed != null) {
@@ -839,6 +859,15 @@ class App {
     syncQueerInUrl(variant);
   }
 
+  private applyHordeFromLink() {
+    this.mode = "horde";
+    this.seedOpen = false;
+    this.fenOpen = false;
+    this.error = "";
+    this.refreshPreview(false);
+    syncHordeInUrl();
+  }
+
   private applySeedFromLink(seed: number) {
     const mode = seededModeFromUrl();
     // Weird Chess960 URL values wrap like the engine; UI then shows the canonical ID.
@@ -859,7 +888,9 @@ class App {
         ? this.api.createClassical()
         : this.mode === "queer"
           ? this.api.createQueer(this.queerVariant)
-          : (() => {
+          : this.mode === "horde"
+            ? this.api.createHorde()
+            : (() => {
               const seeded: SeededMode = this.mode;
               const trimmed = this.seedInput.trim();
               if (trimmed !== "") {
@@ -910,6 +941,8 @@ class App {
         );
       } else if (this.playMode === "queer") {
         syncQueerInUrl(this.queerVariant);
+      } else if (this.playMode === "horde") {
+        syncHordeInUrl();
       } else {
         syncSeedInUrl(null);
       }
@@ -1086,6 +1119,8 @@ class App {
           <button type="button" role="tab" class="mode-link${this.mode === "anarchy" ? " active anarchy" : ""}" data-mode="anarchy" aria-selected="${this.mode === "anarchy"}">Anarchy</button>
           <span class="mode-sep" aria-hidden="true">·</span>
           <button type="button" role="tab" class="mode-link${this.mode === "chess960" ? " active chess960" : ""}" data-mode="chess960" aria-selected="${this.mode === "chess960"}">Chess960</button>
+          <span class="mode-sep" aria-hidden="true">·</span>
+          <button type="button" role="tab" class="mode-link${this.mode === "horde" ? " active" : ""}" data-mode="horde" aria-selected="${this.mode === "horde"}">Horde</button>
           ${
             isQueerUnlocked()
               ? `<span class="mode-sep" aria-hidden="true">·</span>
@@ -1221,7 +1256,9 @@ class App {
                          ? ` Chess960 ID ${this.remoteSetup.seed}.`
                          : this.remoteSetup?.kind === "queer"
                            ? ` ${queerLabel(this.remoteSetup.variant)}.`
-                           : ""
+                           : this.remoteSetup?.kind === "horde"
+                             ? " Horde."
+                             : ""
                  }</p>`
               : st.phase === "error"
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
@@ -1348,7 +1385,9 @@ class App {
           ? "Chess960"
           : this.playMode === "queer"
             ? queerLabel(this.queerVariant)
-            : "Classical";
+            : this.playMode === "horde"
+              ? "Horde"
+              : "Classical";
     const offer = drawOfferText(g);
     const acceptDraw = canAcceptDraw(g, this.myColor);
     const drawLabel = acceptDraw ? "Accept draw" : "Draw";
@@ -1568,7 +1607,9 @@ class App {
               ? "chess960"
               : raw === "queer"
                 ? "queer"
-                : "classical";
+                : raw === "horde"
+                  ? "horde"
+                  : "classical";
         if (next === "queer" && !isQueerUnlocked()) return;
         if (next === this.mode) return;
         this.mode = next;
@@ -1591,6 +1632,8 @@ class App {
           syncSeedInUrl(null);
         } else if (next === "queer") {
           syncQueerInUrl(this.queerVariant);
+        } else if (next === "horde") {
+          syncHordeInUrl();
         }
         this.refreshPreview(true);
         if (isSeededMode(next) && this.previewSeed != null) {
@@ -1742,6 +1785,9 @@ class App {
       } else if (this.mode === "queer") {
         this.playMode = "queer";
         this.tryResult(this.api.createQueer(this.queerVariant));
+      } else if (this.mode === "horde") {
+        this.playMode = "horde";
+        this.tryResult(this.api.createHorde());
       } else {
         const seeded: SeededMode = this.mode;
         this.playMode = seeded;
@@ -1774,6 +1820,8 @@ class App {
       if (queer) {
         this.playMode = "queer";
         this.queerVariant = queer;
+      } else if (fen.includes("horde")) {
+        this.playMode = "horde";
       } else if (result.ok && result.game?.seed != null) {
         this.playMode = fen.includes("960") ? "chess960" : "anarchy";
       } else {

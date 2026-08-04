@@ -1,7 +1,7 @@
 (** Forsyth–Edwards Notation (FEN) encode / decode.
 
     Optional trailing fields: layout seed and/or variant tags
-    ([dk] / [dq] / [960]). Chess960 midgame castling rights via FEN are
+    ([dk] / [dq] / [960] / [horde]). Chess960 midgame castling rights via FEN are
     approximate (no Shredder/X-FEN); see [immobile] rebuild on load. *)
 
 type error =

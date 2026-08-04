@@ -92,6 +92,11 @@ let pawn_dir = function
   | White -> 1
   | Black -> -1
 
+(** Ranks from which a pawn may double-step (Horde: white also from rank 1). *)
+let pawn_double_ranks pos color =
+  let base = pawn_start_rank color in
+  if pos.Position.rules.horde && color = White then [ 1; base ] else [ base ]
+
 let immobile pos sq = List.mem sq pos.Position.immobile
 
 let drop_immobile immobile sqs =
@@ -311,7 +316,7 @@ let is_pawn_pseudo pos from to_ piece =
   else if dx = 0 && dy = dir && dest = None then true
   else if
     dx = 0 && dy = 2 * dir
-    && fy = pawn_start_rank piece.color
+    && List.mem fy (pawn_double_ranks pos piece.color)
     && dest = None
     && Board.get pos.board (fx, fy + dir) = None
   then true
@@ -464,9 +469,16 @@ let apply_unchecked pos move =
         | _ -> b
       in
       let en_passant =
+        (* Horde: double-step from rank 1 does not grant en passant (Lichess). *)
         if piece.kind = Pawn && abs (snd to_ - snd from) = 2 then
-          let mid = (fst from, (snd from + snd to_) / 2) in
-          Some mid
+          let from_rank = snd from in
+          let horde_no_ep =
+            pos.rules.horde && piece.color = White && from_rank = 1
+          in
+          if horde_no_ep then None
+          else
+            let mid = (fst from, (snd from + snd to_) / 2) in
+            Some mid
         else None
       in
       let captured = captured_sq <> None in
@@ -500,7 +512,7 @@ let promo_variants pos from to_ piece =
       pos.Position.rules.promo_kinds
   else [ Normal { from; to_; promotion = None } ]
 
-let targets_for piece from _pos =
+let targets_for piece from pos =
   let fx, fy = from in
   match piece.kind with
   | Pawn ->
@@ -508,7 +520,8 @@ let targets_for piece from _pos =
       let forwards =
         (fx, fy + dir)
         ::
-        (if fy = pawn_start_rank piece.color then [ (fx, fy + (2 * dir)) ]
+        (if List.mem fy (pawn_double_ranks pos piece.color) then
+           [ (fx, fy + (2 * dir)) ]
          else [])
       in
       let captures = [ (fx - 1, fy + dir); (fx + 1, fy + dir) ] in

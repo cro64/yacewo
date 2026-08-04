@@ -23,6 +23,7 @@ type ruleset = {
   critical : piece_kind;
   castling : castle_style;
   promo_kinds : piece_kind list;
+  horde : bool;
 }
 
 type t = {
@@ -54,23 +55,59 @@ let no_castling =
     black_queen = false;
   }
 
+let black_castling_only =
+  {
+    white_king = false;
+    white_queen = false;
+    black_king = true;
+    black_queen = true;
+  }
+
 let default_promo = [ Queen; Rook; Bishop; Knight ]
 
 let queer_promo = [ Queen; Rook; Bishop; Knight; King ]
 
 let rules_classical =
-  { critical = King; castling = Standard; promo_kinds = default_promo }
+  {
+    critical = King;
+    castling = Standard;
+    promo_kinds = default_promo;
+    horde = false;
+  }
 
 let rules_anarchy = rules_classical
 
 let rules_chess960 =
-  { critical = King; castling = Chess960; promo_kinds = default_promo }
+  {
+    critical = King;
+    castling = Chess960;
+    promo_kinds = default_promo;
+    horde = false;
+  }
 
 let rules_double_kings =
-  { critical = King; castling = Flexible; promo_kinds = queer_promo }
+  {
+    critical = King;
+    castling = Flexible;
+    promo_kinds = queer_promo;
+    horde = false;
+  }
 
 let rules_double_queens =
-  { critical = Queen; castling = Flexible; promo_kinds = queer_promo }
+  {
+    critical = Queen;
+    castling = Flexible;
+    promo_kinds = queer_promo;
+    horde = false;
+  }
+
+let rules_horde =
+  {
+    critical = King;
+    castling = Standard;
+    promo_kinds = default_promo;
+    horde = true;
+  }
 
 let make ?(turn = White) ?(castling = all_castling) ?(en_passant = None)
     ?(halfmove = 0) ?(fullmove = 1) ?(rules = rules_classical)
@@ -109,6 +146,10 @@ let queer_queens =
   let pieces = Setup.queer_queens in
   make ~rules:rules_double_queens ~immobile:(start_immobile pieces)
     (Board.of_list pieces)
+
+let horde =
+  make ~castling:black_castling_only ~rules:rules_horde
+    (Board.of_list Setup.horde)
 
 let of_pieces ?(turn = White) ?(castling = all_castling) ?(en_passant = None)
     ?(rules = rules_classical) ?(immobile = []) pieces =

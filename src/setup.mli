@@ -26,3 +26,6 @@ val queer_kings : (square * piece) list
 
 val queer_queens : (square * piece) list
 (** Double Queens: [RNBQQBNR] + pawns for both sides (no kings). *)
+
+val horde : (square * piece) list
+(** Lichess Horde: 36 white pawns vs a normal black army. *)

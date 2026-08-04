@@ -54,6 +54,7 @@ export interface YacewoApi {
   createChess960: (seed: number) => EngineResult;
   /** Pass `"kings"` / `"queens"` (or `"dk"` / `"dq"`). */
   createQueer: (variant: string) => EngineResult;
+  createHorde: () => EngineResult;
   ofFen: (fen: string) => EngineResult;
   applyNotation: (n: string) => EngineResult;
   applyMove: (

@@ -2,7 +2,8 @@ open Piece
 
 type queer_variant = [ `TwoKings | `TwoQueens ]
 
-type mode = [ `Classical | `Anarchy | `Chess960 | `Queer of queer_variant ]
+type mode =
+  [ `Classical | `Anarchy | `Chess960 | `Queer of queer_variant | `Horde ]
 
 type error =
   | Notation of Notation.error
@@ -66,6 +67,7 @@ let create ?seed mode =
       empty_meta (Some id) (Position.chess960 ~seed:id)
   | `Queer `TwoKings -> empty_meta None Position.queer_kings
   | `Queer `TwoQueens -> empty_meta None Position.queer_queens
+  | `Horde -> empty_meta None Position.horde
 
 let of_fen fen =
   match Fen.of_fen fen with

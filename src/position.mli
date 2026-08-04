@@ -20,6 +20,8 @@ type ruleset = {
       (** Kind that must stay safe; check/mate use every piece of this kind. *)
   castling : castle_style;
   promo_kinds : piece_kind list;
+  horde : bool;
+      (** Lichess Horde: wipeout wins, white rank-1 double-step (no e.p.). *)
 }
 
 type t = {
@@ -39,6 +41,9 @@ val all_castling : castling_rights
 val no_castling : castling_rights
 (** No castling rights. *)
 
+val black_castling_only : castling_rights
+(** Black kingside and queenside only (Horde). *)
+
 val default_promo : piece_kind list
 val queer_promo : piece_kind list
 
@@ -56,6 +61,10 @@ val rules_double_kings : ruleset
 
 val rules_double_queens : ruleset
 (** Critical queens, flexible castling, king-capable promotion. *)
+
+val rules_horde : ruleset
+(** Critical king (Black only has one), no white castling rights in practice,
+    standard promotions; Horde double-step / wipeout flags. *)
 
 val make :
   ?turn:color ->
@@ -83,6 +92,9 @@ val queer_kings : t
 
 val queer_queens : t
 (** Double Queens: RNBQQBNR, both queens are critical (no kings). *)
+
+val horde : t
+(** Lichess Horde: 36 white pawns vs a normal black army. *)
 
 val of_pieces :
   ?turn:color ->

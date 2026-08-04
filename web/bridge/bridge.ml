@@ -167,6 +167,8 @@ let create_queer (variant_js : Js.js_string Js.t) =
   in
   result_ok (Game_engine.create mode)
 
+let create_horde () = result_ok (Game_engine.create `Horde)
+
 let of_fen fen_js =
   apply_engine_result (Game_engine.of_fen (Js.to_string fen_js))
 
@@ -234,6 +236,7 @@ let () =
        method createAnarchy seed = create_anarchy seed
        method createChess960 seed = create_chess960 seed
        method createQueer variant = create_queer variant
+       method createHorde = create_horde ()
        method ofFen fen = of_fen fen
        method applyNotation n = apply_notation n
        method applyMove f t p = apply_move f t p

@@ -260,6 +260,80 @@ let classical_setup_tests =
       let g2 = must_ok (of_fen fen) in
       assert_equal fen (to_fen g2);
       assert_equal Queen (position g2).rules.critical );
+    ( "horde layout" >:: fun _ ->
+      let g = create `Horde in
+      let b = board g in
+      assert_equal 36 (count_color b White);
+      assert_equal 16 (count_color b Black);
+      assert_equal
+        (Some { kind = Pawn; color = White })
+        (get b (5, 1));
+      assert_equal None
+        (List.find_opt
+           (fun (_, p) -> p.kind = King && p.color = White)
+           (all_pieces b));
+      assert_equal
+        (Some { kind = King; color = Black })
+        (get b (5, 8));
+      assert_equal
+        (Some { kind = Pawn; color = White })
+        (get b (2, 5));
+      assert_equal None (get b (4, 5));
+      assert_bool "horde tag" (Filename.check_suffix (to_fen g) " horde");
+      assert_bool "black castling only"
+        ((not (position g).castling.white_king)
+        && (position g).castling.black_king) );
+    ( "horde rank-1 double-step no ep" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_horde ~castling:black_castling_only
+          [
+            ((1, 1), piece Pawn White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m = Normal { from = (1, 1); to_ = (1, 3); promotion = None } in
+      assert_bool "a1-a3 legal" (is_legal pos m);
+      let next = apply_unchecked pos m in
+      assert_equal None next.en_passant;
+      let from_rank2 =
+        pos_of ~rules:rules_horde ~castling:black_castling_only
+          [
+            ((1, 2), piece Pawn White);
+            ((5, 8), piece King Black);
+          ]
+      in
+      let m2 = Normal { from = (1, 2); to_ = (1, 4); promotion = None } in
+      assert_bool "a2-a4 still legal" (is_legal from_rank2 m2);
+      let after2 = apply_unchecked from_rank2 m2 in
+      assert_equal (Some (1, 3)) after2.en_passant );
+    ( "horde wipeout wins" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_horde ~castling:black_castling_only ~turn:White
+          [
+            ((5, 8), piece King Black);
+            (* White has no pieces — wipeout on white to move. *)
+          ]
+      in
+      assert_equal (Checkmate White) (status_of pos) );
+    ( "horde white cannot be checked" >:: fun _ ->
+      let pos =
+        pos_of ~rules:rules_horde ~castling:black_castling_only
+          [
+            ((4, 4), piece Pawn White);
+            ((5, 8), piece King Black);
+            ((4, 8), piece Rook Black);
+          ]
+      in
+      assert_bool "no white king / no check" (not (in_check pos White));
+      assert_bool "pawn can move"
+        (is_legal pos
+           (Normal { from = (4, 4); to_ = (4, 5); promotion = None })) );
+    ( "horde fen round-trip" >:: fun _ ->
+      let g = create `Horde in
+      let fen = to_fen g in
+      let g2 = must_ok (of_fen fen) in
+      assert_equal fen (to_fen g2);
+      assert_bool "horde flag" (position g2).rules.horde );
   ]
 
 (* ---------- notation / basic moves ---------- *)

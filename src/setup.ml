@@ -360,3 +360,21 @@ let queer_kings =
 
 let queer_queens =
   queer_side `TwoQueens White @ queer_side `TwoQueens Black
+
+(** Lichess Horde: 36 white pawns vs a normal black army.
+    FEN [rnbqkbnr/pppppppp/8/1PP2PP1/PPPPPPPP/PPPPPPPP/PPPPPPPP/PPPPPPPP w kq - 0 1] *)
+let horde =
+  let white_pawns =
+    let full ranks =
+      List.concat_map
+        (fun r -> List.init 8 (fun i -> ((i + 1, r), mk Pawn White)))
+        ranks
+    in
+    let rank5 =
+      [ 2; 3; 6; 7 ]
+      |> List.map (fun f -> ((f, 5), mk Pawn White))
+    in
+    full [ 1; 2; 3; 4 ] @ rank5
+  in
+  let black = generate_side Black (classical_side_spec Black) in
+  white_pawns @ black

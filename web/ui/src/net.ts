@@ -10,6 +10,7 @@ export type GameSetup =
   | { kind: "anarchy"; seed: number }
   | { kind: "chess960"; seed: number }
   | { kind: "queer"; variant: QueerVariant }
+  | { kind: "horde" }
   | { kind: "fen"; fen: string };
 
 export type NetMsg =
@@ -385,6 +386,7 @@ function parseSetup(raw: unknown): GameSetup | null {
       return { kind: "queer", variant: "kings" };
     }
   }
+  if (s.kind === "horde") return { kind: "horde" };
   if (s.kind === "fen" && typeof s.fen === "string" && s.fen.trim()) {
     return { kind: "fen", fen: s.fen.trim() };
   }
