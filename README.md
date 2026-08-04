@@ -8,7 +8,9 @@ Two-player chess in the browser or terminal — **Classical** openings, **Anarch
 seeded armies, **Chess960**, **Horde**, and **peer-to-peer rooms** you can share
 with a link.
 
-
+<p align="center">
+  <img src="images/demo.gif" alt="YACEWO play demo" width="720" />
+</p>
 
 ## Features
 
@@ -23,11 +25,7 @@ with a link.
 - **Notation** — click-to-move or type `e4`, `Nf3`, `O-O`, …; Escape clears selection / Help
 - **Undo / Resign / Draw / Quit** — offer-and-accept draws; Undo is hotseat only (disabled online)
 
-
-
 ## Screenshots
-
-
 
 ### Landing
 
@@ -35,21 +33,27 @@ Classical, Anarchy, Chess960, or Horde, then Play — or create / join a remote
 room. FEN and Seed/ID open when you need a custom start. Anarchy seeds sync as
 `?seed=…`; Chess960 as `?mode=chess960&seed=…`; Horde as `?mode=horde`.
 
-
+<p>
+  <img src="images/landing.png" alt="YACEWO landing — Classical, Anarchy, Chess960, or Horde; Create or Join Room" width="720" />
+</p>
 
 ### Classical
 
 Standard rules, move list, live FEN with copy, optional Last move / Coords /
 Auto-flip, and the usual game actions (Quit returns to the landing screen).
 
-
+<p>
+  <img src="images/classical.png" alt="Classical game in progress after 1. e4 e5 2. Nf3" width="720" />
+</p>
 
 ### Anarchy
 
 Pick or roll a seed; the army layout is reproducible and shown in the panel
 (and in FEN as a seventh field). Open `/yacewo/?seed=42` to land on that army.
 
-
+<p>
+  <img src="images/anarchy.png" alt="Anarchy mode with seed 42" width="720" />
+</p>
 
 ### Chess960
 
@@ -58,7 +62,9 @@ starting array. Castling follows Chess960 (king ends on c/g, rook on d/f).
 Open `/yacewo/?mode=chess960&seed=518` for the familiar layout. Out-of-range
 URL values wrap modulo 960; the ID field itself only accepts 0–959.
 
-
+<p>
+  <img src="images/chess960.png" alt="Chess960 position with FIDE ID 518" width="720" />
+</p>
 
 ### Horde
 
@@ -66,7 +72,9 @@ White fields 36 pawns; Black keeps a normal army. Rank-1 White pawns may
 double-step. Black wins by capturing every White piece (not only the king).
 Open `/yacewo/?mode=horde`.
 
-
+<p>
+  <img src="images/horde.png" alt="Horde — White's 36-pawn army vs Black" width="720" />
+</p>
 
 ### Remote rooms
 
@@ -76,11 +84,13 @@ auto-join. Setup (Classical, Anarchy seed, Chess960 ID, Horde, Queer, or FEN)
 is sent with the handshake. If a guest disconnects mid-game, the host waits and
 the guest can rejoin the same room.
 
- 
+<p>
+  <img src="images/remote-lobby.png" alt="Remote lobby — waiting for opponent with copy link" width="720" />
+  &nbsp;
+  <img src="images/remote-join.png" alt="Join Room with a six-character code" width="720" />
+</p>
 
 ## Easter Egg
-
-
 
 ### Queer
 
@@ -89,7 +99,9 @@ open the share link. Double Kings (`RNBKKBNR`) or Double Queens (`RNBQQBNR`):
 every critical piece must stay safe each turn; pawns may promote to king.
 Open `/yacewo/?mode=dk` or `/yacewo/?mode=dq`.
 
-
+<p>
+  <img src="images/queer.png" alt="Queer Double Kings — pastel board and legal markers" width="720" />
+</p>
 
 ## Web UI
 
@@ -109,8 +121,6 @@ Regenerate README screenshots / demo (with `make web-dev` or `vite preview` runn
 node scripts/capture-demos.mjs   # needs playwright + ffmpeg
 ```
 
-
-
 ## Terminal
 
 ```sh
@@ -123,8 +133,6 @@ See [INSTALL.md](INSTALL.md) for OCaml and web setup.
 
 ## Credits
 
-- Main Engine started as CS3110 @ Cornell final-project. Heavily modified since.
-- Queer mode: we clocked
-  [homonormative-chess](https://github.com/SwiftWinds/homonormative-chess),
-  whispered “say less,” and dual-wielded the royalty.
+Main Engine started as CS3110 @ Cornell final-project. Heavily modified since.
 
+Queer mode inspired by [homonormative-chess](https://github.com/SwiftWinds/homonormative-chess) 💅
