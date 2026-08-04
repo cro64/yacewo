@@ -1810,8 +1810,6 @@ class App {
   }
 
   private bind() {
-    unlockAudio();
-
     this.root.querySelector("[data-action='sound']")?.addEventListener("click", () => {
       const on = toggleSound();
       if (on) {

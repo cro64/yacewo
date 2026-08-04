@@ -30,6 +30,8 @@ export type Sfx =
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+let resumeChain: Promise<void> | null = null;
+let gestureUnlockInstalled = false;
 
 function loadMuted(): boolean {
   return localStorage.getItem(KEY) === "off";
@@ -71,14 +73,69 @@ function ensureCtx(): AudioContext | null {
       return null;
     }
   }
-  if (ctx.state === "suspended") void ctx.resume();
   return ctx;
 }
 
-/** Call from a user gesture so autoplay policies unlock audio. */
-export function unlockAudio() {
-  ensureCtx();
+/** Near-silent start inside a gesture — required to unlock iOS Safari. */
+function kickSilent(c: AudioContext) {
+  try {
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    g.gain.value = 0.0001;
+    osc.connect(g);
+    g.connect(c.destination);
+    osc.start(0);
+    osc.stop(c.currentTime + 0.001);
+  } catch {
+    /* ignore */
+  }
 }
+
+function resumeCtx(c: AudioContext): Promise<void> {
+  if (c.state === "running") return Promise.resolve();
+  if (!resumeChain) {
+    resumeChain = c
+      .resume()
+      .catch(() => undefined)
+      .then(() => {
+        resumeChain = null;
+      });
+  }
+  return resumeChain;
+}
+
+/**
+ * Call from a user gesture so autoplay policies unlock audio.
+ * iOS needs both resume() and a synchronous oscillator/buffer start.
+ */
+export function unlockAudio() {
+  const c = ensureCtx();
+  if (!c) return;
+  kickSilent(c);
+  void resumeCtx(c);
+}
+
+/** First tap/click anywhere unlocks Web Audio on mobile browsers. */
+export function installGestureUnlock() {
+  if (gestureUnlockInstalled || typeof window === "undefined") return;
+  gestureUnlockInstalled = true;
+  const opts: AddEventListenerOptions = { capture: true, passive: true };
+  const onGesture = () => {
+    unlockAudio();
+    if (ctx?.state === "running") {
+      window.removeEventListener("pointerdown", onGesture, opts);
+      window.removeEventListener("touchstart", onGesture, opts);
+      window.removeEventListener("click", onGesture, opts);
+      window.removeEventListener("keydown", onGesture, opts);
+    }
+  };
+  window.addEventListener("pointerdown", onGesture, opts);
+  window.addEventListener("touchstart", onGesture, opts);
+  window.addEventListener("click", onGesture, opts);
+  window.addEventListener("keydown", onGesture, opts);
+}
+
+installGestureUnlock();
 
 function dest(c: AudioContext): AudioNode {
   return master ?? c.destination;
@@ -170,6 +227,22 @@ export function play(sfx: Sfx) {
   const c = ensureCtx();
   if (!c) return;
 
+  const run = () => {
+    if (c.state !== "running") return;
+    playSfx(c, sfx);
+  };
+
+  if (c.state === "running") {
+    run();
+    return;
+  }
+
+  // First interaction on mobile: unlock then play once the context is running.
+  kickSilent(c);
+  void resumeCtx(c).then(run);
+}
+
+function playSfx(c: AudioContext, sfx: Sfx) {
   switch (sfx) {
     case "select":
       wood(c, { duration: 0.028, gain: 0.035, freq: 1100, q: 1.4 });
