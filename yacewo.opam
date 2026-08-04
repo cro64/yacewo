@@ -1,5 +1,5 @@
 opam-version: "2.0"
-synopsis: "Yet Another Chess Engine Written in OCaml"
+synopsis: "Yet Another Chess Enigma, Written in OCaml"
 description: """
 YACEWO — Classical and Anarchy two-player chess with a UI-ready engine API.
 """

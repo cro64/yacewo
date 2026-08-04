@@ -1312,7 +1312,7 @@ class App {
         <div class="landing-wash" aria-hidden="true"></div>
         <div class="landing-frost" aria-hidden="true"></div>
         <section class="landing-hero">
-          <h1>(Yet Another) Chess Engine Written in OCaml</h1>
+          <h1>Yet Another Chess Enigma, Written in OCaml</h1>
         </section>
         ${this.renderPreviewBoard()}
         <section class="landing-cta">

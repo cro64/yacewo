@@ -267,7 +267,7 @@ let rec play_mode () =
 
 let main () =
   ANSITerminal.print_string [ ANSITerminal.red ]
-    "\n\nWelcome to YACEWO — Yet Another Chess Engine Written in OCaml.\n";
+    "\n\nWelcome to YACEWO — Yet Another Chess Enigma, Written in OCaml.\n";
   play_mode_print ();
   let mode = play_mode () in
   let game =

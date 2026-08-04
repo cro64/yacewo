@@ -1,6 +1,6 @@
 # YACEWO
 
-**(Yet Another) Chess Engine Written in OCaml**
+**Yet Another Chess Enigma, Written in OCaml**
 
 [Play online →](https://cro64.github.io/yacewo/)
 
