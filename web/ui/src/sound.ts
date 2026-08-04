@@ -33,22 +33,6 @@ let master: GainNode | null = null;
 let gestureUnlockInstalled = false;
 let iosUnlocked = false;
 let pending: Sfx[] = [];
-/** Looping silent <audio> forces iOS onto the media channel (ignores ringer switch). */
-let silentEl: HTMLAudioElement | null = null;
-
-/**
- * Short silent WAV (feross/unmute-ios-audio style). Sample-rate digits are
- * filled so WebKit treats it as a valid media file.
- */
-function silentWavDataUri(sampleRate = 44100): string {
-  const buf = new ArrayBuffer(10);
-  const view = new DataView(buf);
-  view.setUint32(0, sampleRate, true);
-  view.setUint32(4, sampleRate, true);
-  view.setUint16(8, 1, true);
-  const mid = btoa(String.fromCharCode(...new Uint8Array(buf))).slice(0, 13);
-  return `data:audio/wav;base64,UklGRisAAABXQVZFZm10IBAAAAABAAEA${mid}AgAZGF0YQcAAACAgICAgICAAAA=`;
-}
 
 function loadMuted(): boolean {
   try {
@@ -71,7 +55,6 @@ export function setSoundOn(on: boolean) {
   } catch {
     /* ignore */
   }
-  if (muted) stopSilentHtml();
 }
 
 export function toggleSound(): boolean {
@@ -93,7 +76,11 @@ function audioContextCtor(): (typeof AudioContext) | null {
   );
 }
 
-/** Safari 16.4+: treat page audio as media, not ringer/ambient. */
+/**
+ * Safari 16.4+: mark page audio as media so the hardware mute switch does not
+ * silence Web Audio — without a looping <audio> (that shows Now Playing).
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/AudioSession/type
+ */
 function forcePlaybackSession() {
   try {
     const session = (
@@ -118,7 +105,6 @@ function ensureCtx(): AudioContext | null {
       forcePlaybackSession();
       ctx = new AC();
       master = ctx.createGain();
-      // Louder master — previous ~0.55 × soft gains was near-inaudible on phones.
       master.gain.value = 0.9;
       master.connect(ctx.destination);
       ctx.addEventListener("statechange", flushPending);
@@ -131,7 +117,7 @@ function ensureCtx(): AudioContext | null {
   return ctx;
 }
 
-/** Howler / iOS9 classic: empty buffer start inside the gesture. */
+/** Empty buffer start inside the gesture — classic Web Audio unlock. */
 function kickBuffer(c: AudioContext) {
   try {
     const buffer = c.createBuffer(1, 1, 22050);
@@ -144,49 +130,8 @@ function kickBuffer(c: AudioContext) {
   }
 }
 
-function stopSilentHtml() {
-  if (!silentEl) return;
-  try {
-    silentEl.pause();
-    silentEl.removeAttribute("src");
-    silentEl.load();
-  } catch {
-    /* ignore */
-  }
-  silentEl = null;
-}
-
 /**
- * Keep a looping silent HTMLAudioElement playing. On iOS this moves Web Audio
- * onto the media category so the hardware mute switch does not silence SFX.
- * @see https://github.com/feross/unmute-ios-audio
- * @see https://stackoverflow.com/questions/40789136/ios-ringer-switch-mutes-web-audio
- */
-function ensureSilentHtml(sampleRate: number) {
-  if (silentEl) {
-    if (silentEl.paused) void silentEl.play().catch(() => undefined);
-    return;
-  }
-  try {
-    const a = document.createElement("audio");
-    a.setAttribute("x-webkit-airplay", "deny");
-    a.preload = "auto";
-    a.loop = true;
-    a.volume = 0.01;
-    a.src = silentWavDataUri(sampleRate);
-    a.load();
-    silentEl = a;
-    void a.play().catch(() => {
-      stopSilentHtml();
-    });
-  } catch {
-    silentEl = null;
-  }
-}
-
-/**
- * Throwaway context resume flips iOS's "gesture succeeded" flag so later
- * AudioContexts can run.
+ * Throwaway context resume flips iOS's "gesture succeeded" flag.
  * @see https://js2devlog.com/en/devlog/ios-safari-audio-unlock
  */
 function kickDummyContext() {
@@ -220,16 +165,13 @@ function flushPending() {
 
 /**
  * Must run synchronously at the top of a user-gesture callback on iOS.
- * Creating AudioContext outside a gesture can leave it unresumable forever.
  */
 export function unlockAudio() {
   if (muted || typeof window === "undefined") return;
   forcePlaybackSession();
-  // Order matters: dummy unlock first, then real ctx + buffer + HTML audio.
   kickDummyContext();
   const c = ensureCtx();
   if (!c) return;
-  ensureSilentHtml(c.sampleRate || 44100);
   kickBuffer(c);
   if (c.state === "suspended" || (c.state as string) === "interrupted") {
     void c.resume().then(() => {
@@ -242,7 +184,6 @@ export function unlockAudio() {
   }
 }
 
-/** First tap anywhere — touchstart/touchend are most reliable on iOS. */
 export function installGestureUnlock() {
   if (gestureUnlockInstalled || typeof window === "undefined") return;
   gestureUnlockInstalled = true;
@@ -264,12 +205,7 @@ export function installGestureUnlock() {
   window.addEventListener("keydown", onGesture, opts);
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      // Drop silent media so iOS does not keep a Now Playing widget.
-      stopSilentHtml();
-      return;
-    }
-    if (!ctx) return;
+    if (document.visibilityState !== "visible" || !ctx) return;
     if (ctx.state === "suspended" || (ctx.state as string) === "interrupted") {
       void ctx.resume().then(flushPending, () => undefined);
     }
