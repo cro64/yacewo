@@ -9,6 +9,109 @@ const MAX_PLAYERS = 2;
 const TTL_FINISHED_MS = 15 * 60 * 1000;
 const TTL_UNFINISHED_MS = 24 * 60 * 60 * 1000;
 
+/** Application WebSocket close codes (4000–4999). */
+const CLOSE = {
+  ERROR: 4000,
+  ROOM_FULL: 4003,
+  ROOM_NOT_FOUND: 4004,
+  CONFLICT: 4009,
+};
+
+function emptyRoom() {
+  return {
+    // Mirrors GameSetup from net.ts: { kind: "classical" | "anarchy" | ... }
+    setup: null,
+    fen: null,
+    seed: null,
+    moveList: "",
+    status: "waiting", // waiting | active | finished
+    playerTokens: { host: null, guest: null },
+  };
+}
+
+/**
+ * Resolve seat for a connecting token.
+ * @returns {{ role: "host" | "guest" } | { error: string, code: number }}
+ */
+function assignSeat(room, token, intent) {
+  const { host, guest } = room.playerTokens;
+
+  // Reconnect — same localStorage token keeps host/guest (White/Black).
+  if (host === token) return { role: "host" };
+  if (guest === token) return { role: "guest" };
+
+  if (intent === "create") {
+    if (host !== null) {
+      return { error: "Room already exists", code: CLOSE.CONFLICT };
+    }
+    room.playerTokens.host = token;
+    return { role: "host" };
+  }
+
+  // intent === "join" — never mint an empty host lobby (no setup/game).
+  if (host === null) {
+    return { error: "Room not found", code: CLOSE.ROOM_NOT_FOUND };
+  }
+  if (guest === null) {
+    const seated = (host ? 1 : 0) + (guest ? 1 : 0);
+    if (seated < MAX_PLAYERS) {
+      room.playerTokens.guest = token;
+      return { role: "guest" };
+    }
+  }
+  return { error: "Room full", code: CLOSE.ROOM_FULL };
+}
+
+/** Persist relay state from a client message. Returns false if ignored. */
+function applyMessage(room, msg) {
+  switch (msg.type) {
+    case "hello":
+      room.setup = msg.setup;
+      room.status = "active";
+      return true;
+    case "ready":
+    case "undo":
+      return true;
+    case "sync":
+      room.fen = msg.fen;
+      room.seed = msg.seed ?? null;
+      room.moveList = msg.moveList ?? room.moveList;
+      if (room.setup || room.fen) room.status = "active";
+      return true;
+    case "move":
+    case "castle":
+    case "notation":
+    case "resign":
+    case "draw":
+      if (msg.state?.fen) room.fen = msg.state.fen;
+      if (typeof msg.state?.moveList === "string") {
+        room.moveList = msg.state.moveList;
+      }
+      if (msg.type === "resign" || msg.type === "draw") {
+        room.status = "finished";
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
+function safeSend(ws, payload) {
+  try {
+    ws.send(typeof payload === "string" ? payload : JSON.stringify(payload));
+  } catch {
+    /* ignore broken sockets */
+  }
+}
+
+function safeClose(ws, code, reason) {
+  try {
+    ws.close(code, reason);
+  } catch {
+    /* ignore */
+  }
+}
+
 export class ChessRoom {
   constructor(state, env) {
     this.state = state;
@@ -18,18 +121,12 @@ export class ChessRoom {
     this.room = null;
   }
 
+  // ── persistence ──────────────────────────────────────────────────
+
   async loadRoom() {
     if (this.room) return this.room;
     const stored = await this.state.storage.get("room");
-    this.room = stored ?? {
-      // Mirrors GameSetup from net.ts: { kind: "classical" | "anarchy" | ... }
-      setup: null,
-      fen: null,
-      seed: null,
-      moveList: "",
-      status: "waiting", // waiting | active | finished
-      playerTokens: { host: null, guest: null },
-    };
+    this.room = stored ?? emptyRoom();
     return this.room;
   }
 
@@ -48,17 +145,15 @@ export class ChessRoom {
 
   async alarm() {
     for (const ws of this.state.getWebSockets()) {
-      try {
-        ws.close(1000, "Room expired");
-      } catch {
-        /* ignore */
-      }
+      safeClose(ws, 1000, "Room expired");
     }
     this.room = null;
     // compatibility_date < 2026-02-24: deleteAll does not clear alarms.
     await this.state.storage.deleteAlarm();
     await this.state.storage.deleteAll();
   }
+
+  // ── websockets ───────────────────────────────────────────────────
 
   attachment(ws) {
     try {
@@ -69,16 +164,80 @@ export class ChessRoom {
   }
 
   broadcast(payload, except = null) {
-    const raw = typeof payload === "string" ? payload : JSON.stringify(payload);
     for (const ws of this.state.getWebSockets()) {
       if (ws === except) continue;
-      try {
-        ws.send(raw);
-      } catch {
-        /* ignore broken sockets */
-      }
+      safeSend(ws, payload);
     }
   }
+
+  /** Accept then immediately fail so the client can read the error. */
+  rejectSocket(message, code = CLOSE.ERROR) {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    server.accept();
+    safeSend(server, { type: "error", message });
+    safeClose(server, code, message);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  tokenConnected(token) {
+    for (const ws of this.state.getWebSockets()) {
+      if (this.attachment(ws)?.token === token) return true;
+    }
+    return false;
+  }
+
+  async acceptPlayer(role, token) {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    // Hibernation accept — DO can sleep while clients stay connected.
+    this.state.acceptWebSocket(server);
+    server.serializeAttachment({ role, token });
+
+    await this.sendCatchUp(server, role);
+    this.announceJoin(server, role);
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async sendCatchUp(socket, role) {
+    const room = await this.loadRoom();
+
+    if (room.status === "active" && room.fen) {
+      safeSend(socket, {
+        type: "sync",
+        fen: room.fen,
+        seed: room.seed,
+        moveList: room.moveList,
+        role,
+      });
+      return;
+    }
+
+    safeSend(socket, { type: "status", phase: "waiting", role });
+    if (room.setup && role === "guest") {
+      safeSend(socket, { type: "hello", setup: room.setup });
+    }
+  }
+
+  announceJoin(server, role) {
+    const others = this.state.getWebSockets().filter((ws) => ws !== server);
+    if (others.length === 0) return;
+
+    this.broadcast({ type: "peer_joined", role }, server);
+    for (const ws of others) {
+      const peerRole = this.attachment(ws)?.role;
+      if (peerRole) safeSend(server, { type: "peer_joined", role: peerRole });
+    }
+  }
+
+  announceLeave(ws) {
+    const role = this.attachment(ws)?.role;
+    if (role) this.broadcast({ type: "peer_left", role }, ws);
+  }
+
+  // ── Durable Object entrypoints ───────────────────────────────────
 
   async fetch(request) {
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -92,157 +251,53 @@ export class ChessRoom {
       return new Response("Missing token", { status: 400 });
     }
 
+    // create = claim empty host seat; join = existing room / reconnect only.
+    const intent =
+      url.searchParams.get("intent") === "create" ? "create" : "join";
+
+    if (this.tokenConnected(token)) {
+      return this.rejectSocket("Already connected in another tab", CLOSE.CONFLICT);
+    }
+
     const room = await this.loadRoom();
-
-    for (const ws of this.state.getWebSockets()) {
-      const att = this.attachment(ws);
-      if (att?.token === token) {
-        return new Response("Already connected in another tab", { status: 409 });
-      }
+    const seat = assignSeat(room, token, intent);
+    if (seat.error) {
+      return this.rejectSocket(seat.error, seat.code);
     }
 
-    const seated =
-      (room.playerTokens.host ? 1 : 0) + (room.playerTokens.guest ? 1 : 0);
-
-    let role;
-    if (room.playerTokens.host === token) {
-      role = "host"; // host is always White
-    } else if (room.playerTokens.guest === token) {
-      role = "guest"; // guest is always Black
-    } else if (room.playerTokens.host === null) {
-      role = "host";
-      room.playerTokens.host = token;
-    } else if (room.playerTokens.guest === null && seated < MAX_PLAYERS) {
-      role = "guest";
-      room.playerTokens.guest = token;
-    } else {
-      return new Response("Room full", { status: 403 });
-    }
     await this.saveRoom();
-
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-
-    // Hibernation accept — DO can sleep while clients stay connected.
-    this.state.acceptWebSocket(server);
-    server.serializeAttachment({ role, token });
-
-    await this.sendCatchUp(server, role);
-
-    const others = this.state.getWebSockets().filter((ws) => ws !== server);
-    if (others.length > 0) {
-      this.broadcast({ type: "peer_joined", role }, server);
-      for (const o of others) {
-        const att = this.attachment(o);
-        if (att?.role) {
-          server.send(JSON.stringify({ type: "peer_joined", role: att.role }));
-        }
-      }
-    }
-
-    return new Response(null, { status: 101, webSocket: client });
-  }
-
-  async sendCatchUp(socket, role) {
-    const room = await this.loadRoom();
-
-    if (room.status === "active" && room.fen) {
-      socket.send(
-        JSON.stringify({
-          type: "sync",
-          fen: room.fen,
-          seed: room.seed,
-          moveList: room.moveList,
-          role,
-        }),
-      );
-    } else if (room.setup) {
-      socket.send(JSON.stringify({ type: "status", phase: "waiting", role }));
-      if (role === "guest") {
-        socket.send(JSON.stringify({ type: "hello", setup: room.setup }));
-      }
-    } else {
-      socket.send(JSON.stringify({ type: "status", phase: "waiting", role }));
-    }
+    return this.acceptPlayer(seat.role, token);
   }
 
   async webSocketMessage(ws, message) {
     const att = this.attachment(ws);
     if (!att?.role) return;
-    const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
-    await this.handleMessage({ role: att.role, token: att.token, socket: ws }, raw);
-  }
 
-  async webSocketClose(ws, code, reason, _wasClean) {
-    const att = this.attachment(ws);
-    if (att?.role) {
-      this.broadcast({ type: "peer_left", role: att.role }, ws);
-    }
-    try {
-      ws.close(code, reason);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async webSocketError(ws) {
-    const att = this.attachment(ws);
-    if (att?.role) {
-      this.broadcast({ type: "peer_left", role: att.role }, ws);
-    }
-    try {
-      ws.close(1011, "WebSocket error");
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async handleMessage(session, raw) {
     let msg;
     try {
+      const raw =
+        typeof message === "string"
+          ? message
+          : new TextDecoder().decode(message);
       msg = JSON.parse(raw);
     } catch {
       return;
     }
 
     const room = await this.loadRoom();
-
-    switch (msg.type) {
-      case "hello": {
-        room.setup = msg.setup;
-        room.status = "active";
-        break;
-      }
-      case "ready":
-        break;
-      case "sync": {
-        room.fen = msg.fen;
-        room.seed = msg.seed ?? null;
-        room.moveList = msg.moveList ?? room.moveList;
-        if (room.setup || room.fen) room.status = "active";
-        break;
-      }
-      case "move":
-      case "castle":
-      case "notation":
-      case "resign":
-      case "draw": {
-        if (msg.state?.fen) room.fen = msg.state.fen;
-        if (typeof msg.state?.moveList === "string") {
-          room.moveList = msg.state.moveList;
-        }
-        if (msg.type === "resign" || msg.type === "draw") {
-          room.status = "finished";
-        }
-        break;
-      }
-      case "undo":
-        break;
-      default:
-        return;
-    }
+    if (!applyMessage(room, msg)) return;
 
     await this.saveRoom();
-    this.broadcast(msg, session.socket);
+    this.broadcast(msg, ws);
+  }
+
+  async webSocketClose(ws, code, reason) {
+    this.announceLeave(ws);
+    safeClose(ws, code, reason);
+  }
+
+  async webSocketError(ws) {
+    this.announceLeave(ws);
+    safeClose(ws, 1011, "WebSocket error");
   }
 }

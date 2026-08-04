@@ -4,7 +4,7 @@ export { ChessRoom };
 
 /**
  * Route WebSocket upgrades to a Durable Object keyed by room code.
- * GET /room/:id?token=… → ChessRoom DO
+ * GET /room/:id?token=…&intent=create|join → ChessRoom DO
  */
 export default {
   async fetch(request, env) {

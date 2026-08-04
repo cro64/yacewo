@@ -1,6 +1,8 @@
 /** Alphabet without 0/O/1/I to keep room codes easy to read aloud. */
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
+const RECONNECT_DELAYS_MS = [400, 800, 1500, 2500, 4000, 6000];
+
 export type QueerVariant = "kings" | "queens";
 
 export type GameSetup =
@@ -65,6 +67,10 @@ export type NetHandlers = {
   onReconnecting?: () => void;
 };
 
+type ConnectIntent = "create" | "join";
+
+// ── room / URL helpers ─────────────────────────────────────────────
+
 function randomRoomCode(len = 6): string {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   let out = "";
@@ -88,12 +94,8 @@ function roomsBaseUrl(): string {
   return raw.trim().replace(/\/$/, "");
 }
 
-function tokenKey(room: string): string {
-  return `yacewo-token-${room}`;
-}
-
 function roomToken(room: string): string {
-  const key = tokenKey(room);
+  const key = `yacewo-token-${room}`;
   let token = localStorage.getItem(key);
   if (!token) {
     token = crypto.randomUUID();
@@ -102,14 +104,44 @@ function roomToken(room: string): string {
   return token;
 }
 
-function wsUrl(room: string, token: string): string {
+function wsUrl(room: string, token: string, intent: ConnectIntent): string {
   let base = roomsBaseUrl();
   if (/^https:/i.test(base)) base = base.replace(/^https:/i, "wss:");
   else if (/^http:/i.test(base)) base = base.replace(/^http:/i, "ws:");
-  return `${base}/room/${encodeURIComponent(room)}?token=${encodeURIComponent(token)}`;
+  return `${base}/room/${encodeURIComponent(room)}?token=${encodeURIComponent(token)}&intent=${intent}`;
 }
 
-const RECONNECT_DELAYS_MS = [400, 800, 1500, 2500, 4000, 6000];
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+function safeClose(ws: WebSocket): void {
+  try {
+    ws.close();
+  } catch {
+    /* ignore already-closed sockets */
+  }
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (!data || typeof data !== "object") return null;
+    return data as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Server rejectSocket payload — only meaningful during handshake. */
+function handshakeError(msg: Record<string, unknown>): string | null {
+  if (msg.type !== "error") return null;
+  return typeof msg.message === "string" && msg.message.trim()
+    ? msg.message.trim()
+    : "Connection error";
+}
+
+// ── session ────────────────────────────────────────────────────────
 
 export class NetSession {
   private ws: WebSocket | null = null;
@@ -122,6 +154,8 @@ export class NetSession {
   private handlers: NetHandlers;
   /** True once the opponent has joined at least once this session. */
   private sawPeer = false;
+  /** Reconnects use join — seat is already claimed by token. */
+  private intent: ConnectIntent = "join";
 
   constructor(handlers: NetHandlers) {
     this.handlers = handlers;
@@ -140,28 +174,20 @@ export class NetSession {
   }
 
   async createRoom(): Promise<string> {
-    this.teardownSocket(true);
-    this.disposed = false;
-    this.intentionalClose = false;
-    this.sawPeer = false;
-    this.reconnectAttempt = 0;
-
     roomsBaseUrl(); // fail fast if unset
 
     const room = randomRoomCode();
-    this.room = room;
-    this.role = "host";
+    this.beginConnect({ room, role: "host", intent: "create" });
     this.handlers.onStatus({ phase: "creating", room });
 
     try {
       await this.openSocket(room);
+      // Further reconnects are seat reclaims, not new creates.
+      this.intent = "join";
       this.handlers.onStatus({ phase: "waiting", room });
       return room;
     } catch (err) {
-      this.teardownSocket(true);
-      const message =
-        err instanceof Error ? err.message : "Could not create room";
-      this.handlers.onStatus({ phase: "error", message, room });
+      this.reportConnectError(err, "Could not create room", room);
       throw err;
     }
   }
@@ -174,28 +200,15 @@ export class NetSession {
       throw new Error(message);
     }
 
-    this.teardownSocket(true);
-    this.disposed = false;
-    this.intentionalClose = false;
-    this.sawPeer = false;
-    this.reconnectAttempt = 0;
     // Role comes from the DO (token identity) — a refreshing host rejoins via ?room=.
-    this.role = null;
-    this.room = room;
+    this.beginConnect({ room, role: null, intent: "join" });
     this.handlers.onStatus({ phase: "joining", room });
 
     try {
       await this.openSocket(room);
-      // Stay joining until peer_joined or sync/hello advances UI; if the
-      // host is already waiting we get peer_joined immediately.
-      if (!this.sawPeer) {
-        this.handlers.onStatus({ phase: "joining", room });
-      }
+      this.statusAfterJoin(room);
     } catch (err) {
-      this.teardownSocket(true);
-      const message =
-        err instanceof Error ? err.message : "Could not join room";
-      this.handlers.onStatus({ phase: "error", message, room });
+      this.reportConnectError(err, "Could not join room", room);
       throw err;
     }
   }
@@ -215,18 +228,61 @@ export class NetSession {
     this.handlers.onStatus({ phase: "idle" });
   }
 
+  // ── connect lifecycle ────────────────────────────────────────────
+
+  private beginConnect(opts: {
+    room: string;
+    role: NetRole | null;
+    intent: ConnectIntent;
+  }): void {
+    this.teardownSocket(true);
+    this.disposed = false;
+    this.intentionalClose = false;
+    this.sawPeer = false;
+    this.reconnectAttempt = 0;
+    this.room = opts.room;
+    this.role = opts.role;
+    this.intent = opts.intent;
+  }
+
+  private reportConnectError(
+    err: unknown,
+    fallback: string,
+    room?: string,
+  ): void {
+    this.teardownSocket(true);
+    const message = errorMessage(err, fallback);
+    this.handlers.onStatus(
+      room != null ? { phase: "error", message, room } : { phase: "error", message },
+    );
+  }
+
+  /** Host refresh keeps waiting; guests stay joining until peer/sync/hello. */
+  private statusAfterJoin(room: string): void {
+    if (this.sawPeer) return;
+    this.handlers.onStatus({
+      phase: this.role === "host" ? "waiting" : "joining",
+      room,
+    });
+  }
+
+  /**
+   * Opens the socket and resolves only after the first catch-up message
+   * (status/sync/…) so rejectSocket open-then-close is not a false success.
+   */
   private openSocket(room: string): Promise<void> {
-    const token = roomToken(room);
-    const url = wsUrl(room, token);
+    const url = wsUrl(room, roomToken(room), this.intent);
 
     return new Promise((resolve, reject) => {
       let settled = false;
+      let sessionOpen = false;
       const ws = new WebSocket(url);
       this.ws = ws;
 
       const finishOk = () => {
         if (settled) return;
         settled = true;
+        sessionOpen = true;
         this.reconnectAttempt = 0;
         resolve();
       };
@@ -236,26 +292,40 @@ export class NetSession {
         reject(err);
       };
 
-      ws.addEventListener("open", () => finishOk());
-
       ws.addEventListener("message", (event) => {
-        this.handleRaw(String(event.data));
-      });
-
-      ws.addEventListener("close", () => {
-        if (this.ws === ws) this.ws = null;
-        if (this.disposed || this.intentionalClose) return;
-        if (!settled) {
-          finishErr(new Error("Connection closed before open"));
+        const raw = String(event.data);
+        if (settled) {
+          this.handleRaw(raw);
           return;
         }
+
+        const early = parseJsonObject(raw);
+        const rejectMsg = early ? handshakeError(early) : null;
+        if (rejectMsg) {
+          finishErr(new Error(rejectMsg));
+          safeClose(ws);
+          return;
+        }
+
+        this.handleRaw(raw);
+        finishOk();
+      });
+
+      ws.addEventListener("close", (event) => {
+        if (this.ws === ws) this.ws = null;
+        if (!settled) {
+          finishErr(
+            new Error(event.reason?.trim() || "Connection closed before open"),
+          );
+          return;
+        }
+        // Rejected handshakes close after an error message — do not reconnect.
+        if (!sessionOpen || this.disposed || this.intentionalClose) return;
         this.scheduleReconnect();
       });
 
       ws.addEventListener("error", () => {
-        if (!settled) {
-          finishErr(new Error("WebSocket connection failed"));
-        }
+        if (!settled) finishErr(new Error("WebSocket connection failed"));
       });
     });
   }
@@ -291,6 +361,20 @@ export class NetSession {
     }
   }
 
+  private teardownSocket(clearRoom: boolean): void {
+    this.clearReconnectTimer();
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) safeClose(ws);
+    if (clearRoom) {
+      this.role = null;
+      this.room = "";
+      this.sawPeer = false;
+    }
+  }
+
+  // ── inbound messages ─────────────────────────────────────────────
+
   private markConnected(): void {
     if (!this.role || !this.room) return;
     this.handlers.onStatus({
@@ -301,84 +385,62 @@ export class NetSession {
   }
 
   private handleRaw(raw: string): void {
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    if (!data || typeof data !== "object") return;
-    const msg = data as Record<string, unknown>;
+    const msg = parseJsonObject(raw);
+    if (!msg) return;
 
-    if (msg.type === "status") {
-      const role = parseRole(msg.role);
-      if (role) this.role = role;
-      if (msg.phase === "waiting" && this.role && this.room) {
-        // Host stays in lobby; guest stays joining until peer_joined.
-        if (this.role === "host" && !this.sawPeer) {
+    switch (msg.type) {
+      case "status": {
+        const role = parseRole(msg.role);
+        if (role) this.role = role;
+        if (
+          msg.phase === "waiting" &&
+          this.role === "host" &&
+          this.room &&
+          !this.sawPeer
+        ) {
           this.handlers.onStatus({ phase: "waiting", room: this.room });
         }
+        return;
       }
-      return;
-    }
-
-    if (msg.type === "peer_joined") {
-      this.sawPeer = true;
-      this.markConnected();
-      this.handlers.onPeerJoined?.();
-      return;
-    }
-
-    if (msg.type === "peer_left") {
-      this.sawPeer = false;
-      if (this.role && this.room) {
-        this.handlers.onStatus({ phase: "waiting", room: this.room });
-      }
-      this.handlers.onPeerLeft();
-      return;
+      case "peer_joined":
+        this.sawPeer = true;
+        this.markConnected();
+        this.handlers.onPeerJoined?.();
+        return;
+      case "peer_left":
+        this.sawPeer = false;
+        if (this.role && this.room) {
+          this.handlers.onStatus({ phase: "waiting", room: this.room });
+        }
+        this.handlers.onPeerLeft();
+        return;
     }
 
     const netMsg = parseMsg(msg);
     if (!netMsg) return;
 
-    if (netMsg.type === "sync") {
-      if (netMsg.role) this.role = netMsg.role;
-      this.sawPeer = true;
-      this.markConnected();
-      this.handlers.onSync(netMsg);
-      return;
-    }
-    if (netMsg.type === "hello") {
-      this.sawPeer = true;
-      this.markConnected();
-      this.handlers.onHello(netMsg.setup);
-      return;
-    }
-    if (netMsg.type === "ready") {
-      this.handlers.onReady();
-      return;
-    }
-    this.handlers.onAction(netMsg);
-  }
-
-  private teardownSocket(clearRoom: boolean): void {
-    this.clearReconnectTimer();
-    const ws = this.ws;
-    this.ws = null;
-    if (ws) {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (clearRoom) {
-      this.role = null;
-      this.room = "";
-      this.sawPeer = false;
+    switch (netMsg.type) {
+      case "sync":
+        if (netMsg.role) this.role = netMsg.role;
+        this.sawPeer = true;
+        this.markConnected();
+        this.handlers.onSync(netMsg);
+        return;
+      case "hello":
+        this.sawPeer = true;
+        this.markConnected();
+        this.handlers.onHello(netMsg.setup);
+        return;
+      case "ready":
+        this.handlers.onReady();
+        return;
+      default:
+        this.handlers.onAction(netMsg);
     }
   }
 }
+
+// ── parsers ────────────────────────────────────────────────────────
 
 function parseRole(raw: unknown): NetRole | null {
   return raw === "host" || raw === "guest" ? raw : null;
