@@ -1,3 +1,9 @@
+; Production web builds use `dune build --profile release` (see Makefile
+; `web-engine`). Release = whole-program js_of_ocaml compilation, which
+; dead-code-eliminates most of the runtime (~2.6MB separate / ~114KB release).
+;
+; Do not pass `--no-source-map` here: the release profile already adds it, and
+; repeating the flag makes js_of_ocaml fail.
 (executable
  (name bridge)
  (libraries yacewo js_of_ocaml)
@@ -5,4 +11,4 @@
   (pps js_of_ocaml-ppx))
  (modes js)
  (js_of_ocaml
-  (flags :standard --no-source-map)))
+  (flags :standard --opt 3 --target-env browser)))

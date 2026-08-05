@@ -41,7 +41,9 @@ Then:
 ```sh
 make web-dev   # Vite at http://localhost:5173/yacewo/
 # or
-make web       # production build into docs/ (GitHub Pages)
+make web       # production build into docs/ (gitignored; for local preview)
 ```
 
-`make web` runs `npm install` in `web/ui` and writes the static site to `docs/`.
+`make web` builds a **release** js_of_ocaml engine (`dune --profile release`), runs
+`npm install` in `web/ui`, and writes the static site to `docs/`. GitHub Pages is
+deployed by Actions on `main` — do not commit `docs/`.

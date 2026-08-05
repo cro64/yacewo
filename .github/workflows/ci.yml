@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ocaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.3.0"
+
+      - name: Install opam dependencies
+        run: opam install . --deps-only --with-test -y
+
+      - name: Run OCaml tests
+        run: opam exec -- make test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.3.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: Install opam dependencies
+        run: opam install . --deps-only -y
+
+      - name: Build release engine + size budget
+        run: opam exec -- make web-engine
+
+      - name: Smoke-test engine bridge
+        run: node scripts/smoke-engine.mjs
+
+      - name: Install UI deps and typecheck/build
+        working-directory: web/ui
+        env:
+          # Public Worker URL; override via repo variable VITE_YACEWO_ROOMS_URL.
+          VITE_YACEWO_ROOMS_URL: ${{ vars.VITE_YACEWO_ROOMS_URL }}
+        run: |
+          export VITE_YACEWO_ROOMS_URL="${VITE_YACEWO_ROOMS_URL:-https://yacewo-rooms.yacewo-rooms.workers.dev}"
+          npm ci
+          npm run build
