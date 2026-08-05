@@ -371,6 +371,10 @@ class App {
   private showCoords = false;
   /** Stack of last-move highlights (popped on undo). */
   private lastMoves: Array<{ from: string; to: string }> = [];
+  /** Screen currently reflected in `root` (for incremental play patches). */
+  private mountedScreen: Screen | null = null;
+  /** Board / promo clicks handled once via root delegation. */
+  private boardDelegated = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -947,6 +951,7 @@ class App {
   }
 
   async boot() {
+    this.mountedScreen = null;
     this.root.innerHTML = `<div class="loading"><p>Loading YACEWO engine…</p></div>`;
     try {
       this.api = await loadEngine();
@@ -970,6 +975,7 @@ class App {
       }
       this.render();
     } catch (e) {
+      this.mountedScreen = null;
       this.root.innerHTML = `<div class="boot-error"><h1>Could not load engine</h1><p>${
         e instanceof Error ? e.message : String(e)
       }</p></div>`;
@@ -1752,19 +1758,279 @@ class App {
   }
 
   render() {
+    // Play updates are frequent (selection, moves, net). Patch in place so we
+    // don't wipe the notation input or rebind the whole tree every ply.
+    if (
+      this.screen === "play" &&
+      this.mountedScreen === "play" &&
+      this.game &&
+      this.root.querySelector("main.play")
+    ) {
+      this.patchPlay();
+      return;
+    }
+
     this.root.innerHTML =
       this.screen === "landing"
         ? this.renderLanding()
         : this.screen === "lobby"
           ? this.renderLobby()
           : this.renderPlay();
+    this.mountedScreen = this.screen;
     this.bind();
+    this.ensureBoardDelegation();
     if (this.screen === "landing" && this.previewAnim) {
       window.setTimeout(() => {
         this.previewAnim = false;
         this.root.querySelector(".landing-preview")?.classList.remove("is-settling");
       }, 700);
     }
+  }
+
+  /** One-time click handlers for squares / promotion (survive board patches). */
+  private ensureBoardDelegation() {
+    if (this.boardDelegated) return;
+    this.boardDelegated = true;
+    this.root.addEventListener("click", (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+
+      const cancelPromo = t.closest<HTMLElement>("[data-action='cancel-promo']");
+      if (cancelPromo && this.root.contains(cancelPromo)) {
+        this.pendingPromo = null;
+        this.clearSelection();
+        this.render();
+        return;
+      }
+
+      const promo = t.closest<HTMLElement>("[data-promo]");
+      if (promo && this.root.contains(promo)) {
+        const kind = promo.dataset.promo as PieceKind | undefined;
+        if (kind) this.applyPromo(kind);
+        return;
+      }
+
+      const sq = t.closest<HTMLElement>("[data-sq]");
+      if (sq && this.root.contains(sq) && this.screen === "play") {
+        const alg = sq.dataset.sq;
+        if (alg) this.onSquareClick(alg);
+      }
+    });
+  }
+
+  /**
+   * Update the play screen without replacing `main.play` / the notation form.
+   * Preserves input focus and avoids full listener rebind.
+   */
+  private patchPlay() {
+    if (!this.game) {
+      this.mountedScreen = null;
+      this.render();
+      return;
+    }
+    const g = this.game;
+
+    const notationInput = this.root.querySelector<HTMLInputElement>(
+      "[data-form='notation'] input[name='notation']",
+    );
+    const focused = notationInput != null && document.activeElement === notationInput;
+    const selStart = notationInput?.selectionStart ?? null;
+    const selEnd = notationInput?.selectionEnd ?? null;
+    // Clicking sound/theme blurs the field first — always trust the live value
+    // unless we intentionally cleared/changed `this.notation` (e.g. after Move).
+    // Live typing is kept in sync via the input listener in bind().
+
+    const soundBtn = this.root.querySelector<HTMLButtonElement>("[data-action='sound']");
+    if (soundBtn) {
+      soundBtn.textContent = soundLabel();
+      soundBtn.setAttribute("aria-pressed", String(isSoundOn()));
+    }
+    const themeBtn = this.root.querySelector<HTMLButtonElement>("[data-action='theme']");
+    if (themeBtn) themeBtn.textContent = themeLabel(this.theme);
+
+    const turnEl = this.root.querySelector(".status-turn");
+    if (turnEl) turnEl.textContent = statusText(g, this.playMode);
+
+    const metaClass =
+      this.playMode === "anarchy"
+        ? "status-meta anarchy"
+        : this.playMode === "chess960"
+          ? "status-meta chess960"
+          : this.playMode === "queer"
+            ? "status-meta queer"
+            : this.playMode === "horde"
+              ? "status-meta horde"
+              : "status-meta";
+    const metaLabel =
+      this.playMode === "anarchy"
+        ? "Anarchy"
+        : this.playMode === "chess960"
+          ? "Chess960"
+          : this.playMode === "queer"
+            ? queerLabel(this.queerVariant)
+            : this.playMode === "horde"
+              ? "Horde"
+              : "Classical";
+    const metaEl = this.root.querySelector(".status-meta");
+    if (metaEl) {
+      metaEl.className = metaClass;
+      metaEl.textContent = metaLabel;
+    }
+
+    const statusEl = this.root.querySelector(".status");
+    const boardWrap = this.root.querySelector(".board-wrap");
+    if (statusEl && boardWrap) {
+      const you = this.myColor ? cap(this.myColor) : null;
+      const room =
+        this.netStatus.phase === "connected" || this.netStatus.phase === "waiting"
+          ? this.netStatus.room
+          : this.net?.getRoom() || "";
+      const waitingRejoin =
+        this.isRemote() &&
+        this.netStatus.phase === "waiting" &&
+        this.screen === "play";
+      const inputLocked = !this.isMyTurn();
+      const bannerSuffix = g.isOver
+        ? ""
+        : waitingRejoin
+          ? " · waiting for rejoin"
+          : this.reconnecting
+            ? " · reconnecting"
+            : inputLocked
+              ? " · waiting"
+              : "";
+      const bannerHtml = you
+        ? `<div class="remote-banner" role="status">You are ${escapeHtml(you)}${
+            room ? ` · ${escapeHtml(room)}` : ""
+          }${bannerSuffix}</div>`
+        : "";
+      const offer = drawOfferText(g);
+      const offerHtml = offer
+        ? `<div class="draw-offer" role="status">${escapeHtml(offer)}</div>`
+        : "";
+
+      this.syncPlayBanner(statusEl, ".remote-banner", bannerHtml);
+      const afterBanner =
+        boardWrap.querySelector(".remote-banner") ?? statusEl;
+      this.syncPlayBanner(afterBanner, ".draw-offer", offerHtml);
+    }
+
+    const plate = this.root.querySelector(".board-plate");
+    if (plate) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = this.renderBoard().trim();
+      const next = tmp.firstElementChild;
+      if (next) plate.replaceWith(next);
+    }
+
+    const inputLocked = !this.isMyTurn();
+    const moveBtn = this.root.querySelector<HTMLButtonElement>(
+      "[data-form='notation'] button[type='submit']",
+    );
+    if (notationInput) {
+      notationInput.disabled = g.isOver || inputLocked;
+      if (notationInput.value !== this.notation) {
+        notationInput.value = this.notation;
+      }
+    }
+    if (moveBtn) moveBtn.disabled = g.isOver || inputLocked;
+
+    const err = this.root.querySelector(".board-wrap > .error-line");
+    if (err) err.textContent = this.error;
+
+    const moveList = this.root.querySelector(".move-list");
+    if (moveList) moveList.textContent = g.moveList || "No moves yet.";
+    const fenBox = this.root.querySelector(".fen-box");
+    if (fenBox) fenBox.textContent = g.fen;
+
+    const copyMoves = this.root.querySelector<HTMLButtonElement>(
+      "[data-action='copy-moves']",
+    );
+    if (copyMoves) {
+      copyMoves.disabled = !g.moveList;
+      copyMoves.textContent = this.copyLabel("moves", "Copy");
+    }
+    const copyFen = this.root.querySelector("[data-action='copy-fen']");
+    if (copyFen) copyFen.textContent = this.copyLabel("fen", "Copy");
+    const copySeed = this.root.querySelector("[data-action='copy-seed']");
+    if (copySeed) copySeed.textContent = this.copyLabel("seed", "Copy");
+    const seedBox = this.root.querySelector(".seed-box");
+    if (seedBox && g.seed != null) seedBox.textContent = String(g.seed);
+
+    const lastBtn = this.root.querySelector<HTMLButtonElement>(
+      "[data-action='toggle-last-move']",
+    );
+    if (lastBtn) lastBtn.setAttribute("aria-pressed", String(this.showLastMove));
+    const coordsBtn = this.root.querySelector<HTMLButtonElement>(
+      "[data-action='toggle-coords']",
+    );
+    if (coordsBtn) coordsBtn.setAttribute("aria-pressed", String(this.showCoords));
+    const flipBtn = this.root.querySelector<HTMLButtonElement>(
+      "[data-action='toggle-auto-flip']",
+    );
+    if (flipBtn) flipBtn.setAttribute("aria-pressed", String(this.autoFlip));
+
+    const undoLocked = g.isOver || this.isRemote();
+    const drawLocked = g.isOver || (this.isRemote() && !this.isMyTurn());
+    const acceptDraw = canAcceptDraw(g, this.myColor);
+    const undoBtn = this.root.querySelector<HTMLButtonElement>("[data-action='undo']");
+    if (undoBtn) undoBtn.disabled = undoLocked;
+    const drawBtn = this.root.querySelector<HTMLButtonElement>("[data-action='draw']");
+    if (drawBtn) {
+      drawBtn.disabled = drawLocked;
+      drawBtn.textContent = acceptDraw ? "Accept draw" : "Draw";
+      drawBtn.classList.toggle("draw-accept", acceptDraw);
+    }
+    const resignBtn = this.root.querySelector<HTMLButtonElement>(
+      "[data-action='resign']",
+    );
+    if (resignBtn) {
+      resignBtn.disabled = g.isOver || (this.isRemote() && !this.isMyTurn());
+    }
+
+    const aside = this.root.querySelector("aside.panel");
+    if (aside) {
+      aside.querySelector(".help")?.remove();
+      aside.querySelector(".rules")?.remove();
+      if (this.rulesOpen) {
+        aside.insertAdjacentHTML(
+          "beforeend",
+          this.renderRules(this.playMode, this.queerVariant),
+        );
+      }
+      if (this.helpOpen) {
+        aside.insertAdjacentHTML("beforeend", this.renderHelp());
+      }
+    }
+
+    this.root.querySelector(".promo")?.remove();
+    if (this.pendingPromo) {
+      this.root.insertAdjacentHTML("beforeend", this.renderPromo());
+    }
+
+    if (focused && notationInput) {
+      notationInput.focus();
+      if (selStart != null && selEnd != null) {
+        notationInput.setSelectionRange(selStart, selEnd);
+      }
+    }
+  }
+
+  /** Insert, replace, or remove a banner/offer node right after `anchor`. */
+  private syncPlayBanner(anchor: Element, selector: string, html: string) {
+    const parent = anchor.parentElement;
+    if (!parent) return;
+    const existing = parent.querySelector(selector);
+    if (!html) {
+      existing?.remove();
+      return;
+    }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html.trim();
+    const next = tmp.firstElementChild;
+    if (!next) return;
+    if (existing) existing.replaceWith(next);
+    else anchor.after(next);
   }
 
   private patchLandingPreview() {
@@ -2075,17 +2341,16 @@ class App {
       this.tryResult(result);
     });
 
-    this.root.querySelectorAll("[data-sq]").forEach((el) => {
-      el.addEventListener("click", () => {
-        const alg = (el as HTMLElement).dataset.sq;
-        if (alg) this.onSquareClick(alg);
-      });
-    });
-
     const preview = this.root.querySelector<HTMLElement>(".preview-board");
     if (preview) this.bindPieceWave(preview);
 
     const form = this.root.querySelector<HTMLFormElement>("[data-form='notation']");
+    const notationField = form?.elements.namedItem("notation");
+    if (notationField instanceof HTMLInputElement) {
+      notationField.addEventListener("input", () => {
+        this.notation = notationField.value;
+      });
+    }
     form?.addEventListener("submit", (e) => {
       e.preventDefault();
       if (!this.isMyTurn()) return;
@@ -2167,17 +2432,6 @@ class App {
     this.root.querySelector("[data-action='copy-seed']")?.addEventListener("click", async () => {
       if (this.game?.seed == null) return;
       await this.copyText(String(this.game.seed), "seed", "seed");
-    });
-    this.root.querySelector("[data-action='cancel-promo']")?.addEventListener("click", () => {
-      this.pendingPromo = null;
-      this.clearSelection();
-      this.render();
-    });
-    this.root.querySelectorAll("[data-promo]").forEach((el) => {
-      el.addEventListener("click", () => {
-        const kind = (el as HTMLElement).dataset.promo as PieceKind;
-        this.applyPromo(kind);
-      });
     });
   }
 }
