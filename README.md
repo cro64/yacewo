@@ -124,11 +124,15 @@ You can still move if they step away. Reconnect anytime in 24 hours.
 Live site: **[https://cro64.github.io/yacewo/](https://cro64.github.io/yacewo/)**
 
 ```sh
-make web          # js_of_ocaml bridge + static site → docs/ (GitHub Pages)
+make web          # release js_of_ocaml bridge + static site → docs/ (local preview)
 make web-dev      # local Vite at http://localhost:5173/yacewo/
 ```
 
 Requires Node.js and `opam install js_of_ocaml js_of_ocaml-ppx`.
+
+Production `make web` / CI builds the bridge with `dune --profile release` (whole-program
+js_of_ocaml). That shrinks `yacewo_engine.js` from ~2.6MB (dev/separate) to ~114KB.
+Do not commit `docs/` — GitHub Actions builds and deploys Pages on push to `main`.
 
 ### Remote rooms (deploy)
 
@@ -159,8 +163,13 @@ Finished games die after 15 minutes. Idle unfinished rooms after 24 hours.
 
    ```sh
    make web-dev   # local UI → live Worker; test join in an incognito window
-   make web       # writes docs/ for GitHub Pages; then commit & push docs/
+   make web       # local production build into docs/ (gitignored)
    ```
+
+   Pushing to `main` runs `.github/workflows/pages.yml`, which rebuilds the site
+   and deploys it. Repo **Settings → Pages → Source** must be **GitHub Actions**
+   (not the `/docs` folder on a branch). Optionally set repository variable
+   `VITE_YACEWO_ROOMS_URL` if the Worker URL changes.
 
    Two players need separate browser profiles (or incognito). Same profile
    reuses the room identity token and can't open two seats.

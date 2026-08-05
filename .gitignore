@@ -20,8 +20,10 @@ yacewo-worker/.wrangler/
 *.local
 
 # Generated engine copy for local Vite (rebuilt by `make web-engine`).
-# The Pages build lives under docs/ and is committed intentionally.
 web/ui/public/yacewo_engine.js
+
+# GitHub Pages output from `make web` / CI. Deployed by Actions — do not commit.
+docs/
 
 # --- Secrets / credentials (never commit) ---
 .env
