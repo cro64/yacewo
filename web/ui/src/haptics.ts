@@ -32,10 +32,6 @@ export function toggleHaptics(): boolean {
   return enabled;
 }
 
-export function hapticLabel(on = isHapticsOn()): string {
-  return on ? "Haptics" : "Still";
-}
-
 // --- Android / Chrome: real Vibration API ---------------------------------
 
 function hasVibrate(): boolean {

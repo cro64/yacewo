@@ -33,12 +33,6 @@ import {
   toggleSound,
   unlockAudio,
 } from "./sound";
-import {
-  hapticLabel,
-  isHapticsOn,
-  toggleHaptics,
-  triggerHaptic,
-} from "./haptics";
 import { subscribeToPush } from "./push";
 import {
   dismissIosInstallPrompt,
@@ -1245,7 +1239,6 @@ class App {
         }
         <div class="topbar-actions">
           <button type="button" class="theme-btn" data-action="sound" aria-pressed="${isSoundOn()}">${soundLabel()}</button>
-          <button type="button" class="theme-btn" data-action="haptics" aria-pressed="${isHapticsOn()}">${hapticLabel()}</button>
           <button type="button" class="theme-btn" data-action="theme">${themeLabel(this.theme)}</button>
         </div>
       </header>
@@ -1878,11 +1871,6 @@ class App {
       soundBtn.textContent = soundLabel();
       soundBtn.setAttribute("aria-pressed", String(isSoundOn()));
     }
-    const hapticsBtn = this.root.querySelector<HTMLButtonElement>("[data-action='haptics']");
-    if (hapticsBtn) {
-      hapticsBtn.textContent = hapticLabel();
-      hapticsBtn.setAttribute("aria-pressed", String(isHapticsOn()));
-    }
     const themeBtn = this.root.querySelector<HTMLButtonElement>("[data-action='theme']");
     if (themeBtn) themeBtn.textContent = themeLabel(this.theme);
 
@@ -2121,12 +2109,6 @@ class App {
         unlockAudio();
         play("ui");
       }
-      this.render();
-    });
-
-    this.root.querySelector("[data-action='haptics']")?.addEventListener("click", () => {
-      const on = toggleHaptics();
-      if (on) triggerHaptic("ui");
       this.render();
     });
 
