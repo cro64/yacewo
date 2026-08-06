@@ -30,16 +30,9 @@ export type Sfx =
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-let gestureUnlockInstalled = false;
-let iosUnlocked = false;
-let pending: Sfx[] = [];
 
 function loadMuted(): boolean {
-  try {
-    return localStorage.getItem(KEY) === "off";
-  } catch {
-    return false;
-  }
+  return localStorage.getItem(KEY) === "off";
 }
 
 let muted = loadMuted();
@@ -50,11 +43,7 @@ export function isSoundOn(): boolean {
 
 export function setSoundOn(on: boolean) {
   muted = !on;
-  try {
-    localStorage.setItem(KEY, on ? "on" : "off");
-  } catch {
-    /* ignore */
-  }
+  localStorage.setItem(KEY, on ? "on" : "off");
 }
 
 export function toggleSound(): boolean {
@@ -66,153 +55,43 @@ export function soundLabel(on = isSoundOn()): string {
   return on ? "Sound" : "Muted";
 }
 
-function audioContextCtor(): (typeof AudioContext) | null {
-  if (typeof window === "undefined") return null;
-  return (
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext ||
-    null
-  );
-}
-
-/**
- * Safari 16.4+: mark page audio as media so the hardware mute switch does not
- * silence Web Audio — without a looping <audio> (that shows Now Playing).
- * @see https://developer.mozilla.org/en-US/docs/Web/API/AudioSession/type
- */
-function forcePlaybackSession() {
-  try {
-    const session = (
-      navigator as Navigator & { audioSession?: { type: string } }
-    ).audioSession;
-    if (session) session.type = "playback";
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
- * iOS: a context created outside a gesture can stay permanently suspended.
- * Only call this from a synchronous user-gesture handler.
- */
 function ensureCtx(): AudioContext | null {
   if (muted || typeof window === "undefined") return null;
   if (!ctx) {
-    const AC = audioContextCtor();
-    if (!AC) return null;
     try {
-      forcePlaybackSession();
+      // On iOS Safari, Web Audio playback can be treated as exclusive,
+      // pausing the user's background music (Spotify/Apple Music) even for
+      // short move sound effects. The AudioSession API lets us explicitly
+      // request "ambient" — mixable with other apps' audio — instead of
+      // leaving it to Safari's default resolution. No-op on browsers that
+      // don't support it (Chrome/Firefox don't have this problem anyway).
+      const nav = navigator as Navigator & {
+        audioSession?: { type: string };
+      };
+      if (nav.audioSession) {
+        nav.audioSession.type = "ambient";
+      }
+
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.9;
+      master.gain.value = 0.55;
       master.connect(ctx.destination);
-      ctx.addEventListener("statechange", flushPending);
     } catch {
-      ctx = null;
-      master = null;
       return null;
     }
   }
+  if (ctx.state === "suspended") void ctx.resume();
   return ctx;
 }
 
-/** Empty buffer start inside the gesture — classic Web Audio unlock. */
-function kickBuffer(c: AudioContext) {
-  try {
-    const buffer = c.createBuffer(1, 1, 22050);
-    const source = c.createBufferSource();
-    source.buffer = buffer;
-    source.connect(c.destination);
-    source.start(0);
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
- * Throwaway context resume flips iOS's "gesture succeeded" flag.
- * @see https://js2devlog.com/en/devlog/ios-safari-audio-unlock
- */
-function kickDummyContext() {
-  const AC = audioContextCtor();
-  if (!AC) return;
-  try {
-    const u = new AC();
-    const done = () => {
-      try {
-        void u.close();
-      } catch {
-        /* ignore */
-      }
-    };
-    if (u.state === "running") {
-      done();
-      return;
-    }
-    void u.resume().then(done, done);
-  } catch {
-    /* ignore */
-  }
-}
-
-function flushPending() {
-  if (!ctx || ctx.state !== "running" || muted) return;
-  const queue = pending;
-  pending = [];
-  for (const sfx of queue) playSfx(ctx, sfx);
-}
-
-/**
- * Must run synchronously at the top of a user-gesture callback on iOS.
- */
+/** Call from a user gesture so autoplay policies unlock audio. */
 export function unlockAudio() {
-  if (muted || typeof window === "undefined") return;
-  forcePlaybackSession();
-  kickDummyContext();
-  const c = ensureCtx();
-  if (!c) return;
-  kickBuffer(c);
-  if (c.state === "suspended" || (c.state as string) === "interrupted") {
-    void c.resume().then(() => {
-      if (c.state === "running") iosUnlocked = true;
-      flushPending();
-    }, () => undefined);
-  } else if (c.state === "running") {
-    iosUnlocked = true;
-    flushPending();
-  }
+  ensureCtx();
 }
-
-export function installGestureUnlock() {
-  if (gestureUnlockInstalled || typeof window === "undefined") return;
-  gestureUnlockInstalled = true;
-  const opts: AddEventListenerOptions = { capture: true, passive: true };
-  const onGesture = () => {
-    unlockAudio();
-    if (iosUnlocked || ctx?.state === "running") {
-      window.removeEventListener("touchstart", onGesture, opts);
-      window.removeEventListener("touchend", onGesture, opts);
-      window.removeEventListener("pointerup", onGesture, opts);
-      window.removeEventListener("click", onGesture, opts);
-      window.removeEventListener("keydown", onGesture, opts);
-    }
-  };
-  window.addEventListener("touchstart", onGesture, opts);
-  window.addEventListener("touchend", onGesture, opts);
-  window.addEventListener("pointerup", onGesture, opts);
-  window.addEventListener("click", onGesture, opts);
-  window.addEventListener("keydown", onGesture, opts);
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !ctx) return;
-    if (ctx.state === "suspended" || (ctx.state as string) === "interrupted") {
-      void ctx.resume().then(flushPending, () => undefined);
-    }
-  });
-}
-
-installGestureUnlock();
 
 function dest(c: AudioContext): AudioNode {
   return master ?? c.destination;
@@ -301,42 +180,24 @@ function wood(
 }
 
 export function play(sfx: Sfx) {
-  if (muted) return;
+  const c = ensureCtx();
+  if (!c) return;
 
-  // Never create AudioContext here — on iOS a context created outside a
-  // user gesture can stay permanently suspended. Gesture unlock owns create.
-  if (!ctx) {
-    pending.push(sfx);
-    return;
-  }
-
-  if (ctx.state === "running") {
-    playSfx(ctx, sfx);
-    return;
-  }
-
-  pending.push(sfx);
-  if (ctx.state === "suspended" || (ctx.state as string) === "interrupted") {
-    void ctx.resume().then(flushPending, () => undefined);
-  }
-}
-
-function playSfx(c: AudioContext, sfx: Sfx) {
   switch (sfx) {
     case "select":
-      wood(c, { duration: 0.028, gain: 0.08, freq: 1100, q: 1.4 });
-      tone(c, { freq: 620, duration: 0.05, type: "triangle", gain: 0.06 });
+      wood(c, { duration: 0.028, gain: 0.035, freq: 1100, q: 1.4 });
+      tone(c, { freq: 620, duration: 0.05, type: "triangle", gain: 0.028 });
       break;
     case "deselect":
-      wood(c, { duration: 0.022, gain: 0.06, freq: 900, q: 1.2 });
+      wood(c, { duration: 0.022, gain: 0.025, freq: 900, q: 1.2 });
       break;
     case "move":
-      wood(c, { duration: 0.05, gain: 0.12, freq: 480, q: 0.9 });
+      wood(c, { duration: 0.05, gain: 0.06, freq: 480, q: 0.9 });
       tone(c, {
         freq: 180,
         duration: 0.09,
         type: "sine",
-        gain: 0.09,
+        gain: 0.045,
         attack: 0.002,
       });
       break;
@@ -465,27 +326,27 @@ function playSfx(c: AudioContext, sfx: Sfx) {
       });
       break;
     case "ui":
-      wood(c, { duration: 0.02, gain: 0.06, freq: 1400, q: 1.8 });
+      wood(c, { duration: 0.02, gain: 0.022, freq: 1400, q: 1.8 });
       break;
     case "mode":
-      wood(c, { duration: 0.028, gain: 0.09, freq: 980, q: 1.3 });
+      wood(c, { duration: 0.028, gain: 0.038, freq: 980, q: 1.3 });
       tone(c, {
         freq: 520,
         duration: 0.07,
         type: "triangle",
-        gain: 0.07,
+        gain: 0.028,
       });
       break;
     case "start":
-      tone(c, { freq: 330, duration: 0.14, type: "sine", gain: 0.09 });
+      tone(c, { freq: 330, duration: 0.14, type: "sine", gain: 0.04 });
       tone(c, {
         freq: 440,
         duration: 0.18,
         type: "triangle",
-        gain: 0.09,
+        gain: 0.04,
         delay: 0.07,
       });
-      wood(c, { duration: 0.04, gain: 0.08, freq: 700, delay: 0.04 });
+      wood(c, { duration: 0.04, gain: 0.035, freq: 700, delay: 0.04 });
       break;
     case "copy":
       tone(c, { freq: 720, duration: 0.06, type: "sine", gain: 0.03 });
