@@ -3,6 +3,9 @@ const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 const RECONNECT_DELAYS_MS = [400, 800, 1500, 2500, 4000, 6000];
 
+/** DO closes the prior socket with this when the same token reconnects. */
+const WS_CLOSE_REPLACED = 4001;
+
 export type QueerVariant = "kings" | "queens";
 
 export type GameSetup =
@@ -323,6 +326,15 @@ export class NetSession {
         }
         // Rejected handshakes close after an error message — do not reconnect.
         if (!sessionOpen || this.disposed || this.intentionalClose) return;
+        // Another tab/reconnect took this seat — stay down, don't fight.
+        if (event.code === WS_CLOSE_REPLACED) {
+          this.handlers.onStatus({
+            phase: "error",
+            message: "Connected in another tab",
+            room: this.room || undefined,
+          });
+          return;
+        }
         this.scheduleReconnect();
       });
 

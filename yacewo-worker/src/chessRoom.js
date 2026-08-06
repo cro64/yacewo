@@ -12,6 +12,8 @@ const TTL_UNFINISHED_MS = 24 * 60 * 60 * 1000;
 /** Application WebSocket close codes (4000–4999). */
 const CLOSE = {
   ERROR: 4000,
+  /** Same token opened a newer socket — kick the stale one. */
+  REPLACED: 4001,
   ROOM_FULL: 4003,
   ROOM_NOT_FOUND: 4004,
   CONFLICT: 4009,
@@ -181,11 +183,17 @@ export class ChessRoom {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  tokenConnected(token) {
+  /**
+   * Abrupt tab closes often leave hibernated sockets still listed in
+   * getWebSockets(), so presence alone cannot mean "still connected."
+   * A new connect with the same token always wins — kick the old socket
+   * rather than reject with "Already connected in another tab."
+   */
+  kickTokenSessions(token) {
     for (const ws of this.state.getWebSockets()) {
-      if (this.attachment(ws)?.token === token) return true;
+      if (this.attachment(ws)?.token !== token) continue;
+      safeClose(ws, CLOSE.REPLACED, "Replaced by new connection");
     }
-    return false;
   }
 
   async acceptPlayer(role, token) {
@@ -257,9 +265,8 @@ export class ChessRoom {
     const intent =
       url.searchParams.get("intent") === "create" ? "create" : "join";
 
-    if (this.tokenConnected(token)) {
-      return this.rejectSocket("Already connected in another tab", CLOSE.CONFLICT);
-    }
+    // Same localStorage token reconnecting (or a second tab) — take over.
+    this.kickTokenSessions(token);
 
     const room = await this.loadRoom();
     const seat = assignSeat(room, token, intent);
@@ -294,7 +301,9 @@ export class ChessRoom {
   }
 
   async webSocketClose(ws, code, reason) {
-    this.announceLeave(ws);
+    // Replaced sockets are immediately succeeded by the same seat —
+    // don't flash peer_left to the opponent during a tab take-over.
+    if (code !== CLOSE.REPLACED) this.announceLeave(ws);
     safeClose(ws, code, reason);
   }
 
