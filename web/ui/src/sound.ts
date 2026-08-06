@@ -78,7 +78,7 @@ function ensureCtx(): AudioContext | null {
           .webkitAudioContext;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.55;
+      master.gain.value = 1;
       master.connect(ctx.destination);
     } catch {
       return null;
