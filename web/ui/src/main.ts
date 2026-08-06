@@ -33,6 +33,7 @@ import {
   toggleSound,
   unlockAudio,
 } from "./sound";
+import { armHapticTargets } from "./haptics";
 import { subscribeToPush } from "./push";
 import {
   dismissIosInstallPrompt,
@@ -1795,6 +1796,7 @@ class App {
     this.mountedScreen = this.screen;
     this.bind();
     this.ensureBoardDelegation();
+    armHapticTargets(this.root);
     if (this.screen === "landing" && this.previewAnim) {
       window.setTimeout(() => {
         this.previewAnim = false;
@@ -2033,6 +2035,8 @@ class App {
     if (this.pendingPromo) {
       this.root.insertAdjacentHTML("beforeend", this.renderPromo());
     }
+
+    armHapticTargets(this.root);
 
     if (focused && notationInput) {
       notationInput.focus();

@@ -1,16 +1,22 @@
 /**
- * Haptic feedback. Android/Chrome uses the real Vibration API. iOS Safari
- * has no public haptics API at all — this uses a known side-effect of the
- * <input type="checkbox" switch> element (Safari 17.4+): toggling it via a
- * real click on its <label> fires the system Taptic Engine. This is a
- * platform quirk, not a sanctioned API — Apple has already patched the
- * underlying behavior once (iOS 26.5), so treat iOS haptics as best-effort
- * and expect it may silently stop working on a future iOS version. There's
- * no way to feature-detect that in advance; it just fails silently, which
- * is fine here since haptics are a nice-to-have, not load-bearing.
+ * Haptic feedback.
+ *
+ * Android/Chrome: Vibration API.
+ *
+ * iOS Safari: no Vibration API. Safari 17.4+ fires the Taptic Engine when an
+ * `<input type="checkbox" switch>` is toggled by a *real* user tap. Apple
+ * closed the programmatic `.click()` loophole in iOS 26.5, so the reliable
+ * path is an invisible switch overlay covering interactive hosts — the finger
+ * lands on the switch itself. Treat as best-effort; may break again in a
+ * future iOS. No feature-detect — failures are silent.
  */
 
 const KEY = "yacewo-haptics";
+const OVERLAY_ATTR = "data-haptic-overlay";
+
+/** Elements that should buzz on a direct tap (iOS overlay hosts). */
+const HOST_SELECTOR =
+  "[data-sq], [data-promo], button[data-action], button.theme-btn, .mode-toggle button, .remote-toggle button, .setup-toggle button";
 
 function loadEnabled(): boolean {
   return localStorage.getItem(KEY) !== "off";
@@ -25,6 +31,12 @@ export function isHapticsOn(): boolean {
 export function setHapticsOn(on: boolean) {
   enabled = on;
   localStorage.setItem(KEY, on ? "on" : "off");
+  // Refresh overlay pointer-events if already armed.
+  if (typeof document !== "undefined") {
+    for (const sw of document.querySelectorAll<HTMLElement>(`[${OVERLAY_ATTR}]`)) {
+      sw.style.pointerEvents = on && !prefersReducedMotion() ? "auto" : "none";
+    }
+  }
 }
 
 export function toggleHaptics(): boolean {
@@ -32,117 +44,137 @@ export function toggleHaptics(): boolean {
   return enabled;
 }
 
-// --- Android / Chrome: real Vibration API ---------------------------------
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent)) return true;
+  // iPadOS 13+ reports as MacIntel with touch.
+  return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+}
 
 function hasVibrate(): boolean {
   return typeof navigator !== "undefined" && "vibrate" in navigator;
 }
 
-// --- iOS: checkbox-switch trick --------------------------------------------
-// One hidden switch, created once and reused. Must be toggled via a real
-// click event on the <label> — WebKit ignores .click() called directly on
-// the input from script, per the underlying behavior this trick relies on.
+// --- iOS: switch overlays under the finger ---------------------------------
 
-let iosLabel: HTMLLabelElement | null = null;
+function attachOverlay(host: HTMLElement) {
+  if (host.querySelector(`[${OVERLAY_ATTR}]`)) return;
 
-function ensureIosSwitch(): HTMLLabelElement | null {
-  if (typeof document === "undefined") return null;
-  if (iosLabel) return iosLabel;
-
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.setAttribute("switch", "");
-  input.setAttribute("aria-hidden", "true");
-  input.tabIndex = -1;
-  input.style.position = "fixed";
-  input.style.width = "1px";
-  input.style.height = "1px";
-  input.style.opacity = "0";
-  input.style.pointerEvents = "none";
-
-  const label = document.createElement("label");
-  label.style.position = "fixed";
-  label.style.width = "1px";
-  label.style.height = "1px";
-  label.style.opacity = "0";
-  label.style.pointerEvents = "none";
-  label.appendChild(input);
-  document.body.appendChild(label);
-
-  iosLabel = label;
-  return label;
-}
-
-function iosTap() {
-  const label = ensureIosSwitch();
-  if (!label) return;
-  label.click(); // dispatches through the label, toggling the input — this is what fires the haptic
-}
-
-/** Multiple taps in quick succession approximate distinct feels, since the
- * trick itself has no intensity/pattern control — just one uniform pulse
- * per toggle. */
-function iosPattern(taps: number, gapMs = 90) {
-  for (let i = 0; i < taps; i++) {
-    window.setTimeout(iosTap, i * gapMs);
+  const pos = getComputedStyle(host).position;
+  if (
+    pos !== "absolute" &&
+    pos !== "relative" &&
+    pos !== "fixed" &&
+    pos !== "sticky"
+  ) {
+    host.style.position = "relative";
   }
+
+  const sw = document.createElement("input");
+  sw.type = "checkbox";
+  sw.setAttribute("switch", "");
+  sw.setAttribute(OVERLAY_ATTR, "");
+  sw.setAttribute("aria-hidden", "true");
+  sw.tabIndex = -1;
+  // Cover the host so the user's tap is a real switch interaction (required
+  // on iOS 26.5+). Click still bubbles to board/button delegation via closest().
+  sw.style.cssText =
+    "position:absolute;inset:0;width:100%;height:100%;" +
+    "margin:0;padding:0;border:0;z-index:5;" +
+    "-webkit-appearance:switch;appearance:auto;" +
+    "opacity:0;cursor:inherit;" +
+    `pointer-events:${enabled && !prefersReducedMotion() ? "auto" : "none"};` +
+    "-webkit-tap-highlight-color:transparent;touch-action:manipulation;";
+
+  host.appendChild(sw);
 }
 
-// --- Public API --------------------------------------------------------
+/**
+ * Arm interactive hosts under `root` with iOS switch overlays.
+ * Call after render / board patch. No-op on non-iOS.
+ */
+export function armHapticTargets(root: ParentNode = document) {
+  if (!enabled || !isIOS() || typeof document === "undefined") return;
+  root.querySelectorAll<HTMLElement>(HOST_SELECTOR).forEach(attachOverlay);
+}
+
+// --- Public cue API (Android vibrate; iOS overlays handle direct taps) -----
 
 export type HapticCue =
-  | "select" // light — piece picked up
-  | "move" // light — legal move landed
-  | "capture" // medium — took a piece
-  | "castle" // medium
-  | "check" // medium, sharper
-  | "checkmate" // heavy — game-ending
-  | "illegal" // error buzz — invalid move attempt
-  | "ui"; // very light — button taps, toggles
+  | "select"
+  | "move"
+  | "capture"
+  | "castle"
+  | "check"
+  | "checkmate"
+  | "illegal"
+  | "ui";
 
-function isIOS(): boolean {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
-}
-
+/**
+ * Fire a haptic cue. On Android this drives the Vibration API. On iOS,
+ * direct taps are already handled by overlays — this is a best-effort
+ * programmatic tick for older iOS (≤26.4) only, and no-ops on 26.5+.
+ */
 export function triggerHaptic(cue: HapticCue) {
-  if (!enabled) return;
+  if (!enabled || prefersReducedMotion()) return;
 
   if (isIOS()) {
-    switch (cue) {
-      case "select":
-      case "ui":
-        iosPattern(1);
-        break;
-      case "move":
-      case "castle":
-        iosPattern(1);
-        break;
-      case "capture":
-      case "check":
-        iosPattern(2);
-        break;
-      case "checkmate":
-        iosPattern(3, 110);
-        break;
-      case "illegal":
-        iosPattern(2, 60); // quicker double-tap reads as a "no"
-        break;
+    // Best-effort for pre-26.5: sync label click inside the user gesture.
+    // Overlays already buzzed for the originating tap; skip to avoid doubles
+    // when the cue is the same tap (select/ui/move). Extra cues like delayed
+    // check still try once.
+    if (cue === "select" || cue === "ui" || cue === "move" || cue === "castle") {
+      return;
+    }
+    iosProgrammaticTap();
+    if (cue === "capture" || cue === "check" || cue === "illegal") {
+      window.setTimeout(iosProgrammaticTap, 60);
+    } else if (cue === "checkmate") {
+      window.setTimeout(iosProgrammaticTap, 90);
+      window.setTimeout(iosProgrammaticTap, 200);
     }
     return;
   }
 
   if (!hasVibrate()) return;
 
-  // Android Vibration API — real patterns, ms on/off pairs.
   const patterns: Record<HapticCue, number | number[]> = {
-    select: 8,
-    ui: 8,
-    move: 12,
-    castle: 15,
-    capture: 20,
-    check: [15, 40, 15],
-    checkmate: [25, 60, 25, 60, 40],
-    illegal: [10, 30, 10],
+    select: 12,
+    ui: 12,
+    move: 18,
+    castle: 22,
+    capture: 28,
+    check: [18, 40, 18],
+    checkmate: [30, 55, 30, 55, 45],
+    illegal: [14, 30, 14],
   };
   navigator.vibrate(patterns[cue]);
+}
+
+/** Older iOS only — may silently no-op on 26.5+. */
+function iosProgrammaticTap() {
+  try {
+    const host = document.body;
+    if (!host) return;
+    const label = document.createElement("label");
+    label.setAttribute("aria-hidden", "true");
+    label.style.cssText =
+      "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("switch", "");
+    label.appendChild(input);
+    host.appendChild(label);
+    label.click();
+    host.removeChild(label);
+  } catch {
+    /* non-critical */
+  }
 }
