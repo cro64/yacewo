@@ -3,6 +3,8 @@
  * Pastel-plate tone: quiet place-thuds, not arcade blips.
  */
 
+import { triggerHaptic, type HapticCue } from "./haptics";
+
 const KEY = "yacewo-sound";
 
 export type Sfx =
@@ -179,7 +181,26 @@ function wood(
   src.stop(t0 + duration + 0.02);
 }
 
+// Not every Sfx has a distinct physical feel worth a separate haptic cue —
+// unmapped ones (ui chrome, connection status, etc.) just don't buzz.
+const HAPTIC_MAP: Partial<Record<Sfx, HapticCue>> = {
+  select: "select",
+  move: "move",
+  capture: "capture",
+  castle: "castle",
+  check: "check",
+  checkmate: "checkmate",
+  illegal: "illegal",
+  promote: "capture",
+  ui: "ui",
+};
+
 export function play(sfx: Sfx) {
+  // Haptics run independent of the sound-muted state and Web Audio context —
+  // someone with sound off may still want the buzz, and vice versa.
+  const cue = HAPTIC_MAP[sfx];
+  if (cue) triggerHaptic(cue);
+
   const c = ensureCtx();
   if (!c) return;
 
