@@ -35,10 +35,7 @@ import {
 } from "./sound";
 import { armHapticTargets } from "./haptics";
 import { subscribeToPush } from "./push";
-import {
-  dismissIosInstallPrompt,
-  shouldShowIosInstallPrompt,
-} from "./iosPrompt";
+import { isIOSSafariNotInstalled } from "./iosPrompt";
 
 type Screen = "landing" | "lobby" | "play";
 type ActionMsg = Exclude<
@@ -1446,7 +1443,11 @@ class App {
                            : this.remoteSetup?.kind === "horde"
                              ? " Horde."
                              : ""
-                 }</p>`
+                 }</p>${
+                   st.phase === "waiting" && isIOSSafariNotInstalled()
+                     ? `<p class="lobby-hint lobby-hint-push">Add to Home Screen for move alerts.</p>`
+                     : ""
+                 }`
               : st.phase === "error" && detail
                 ? `<p class="lobby-hint">${escapeHtml(detail)}</p>`
                 : ""
@@ -1787,12 +1788,11 @@ class App {
     }
 
     this.root.innerHTML =
-      this.renderIosInstallBanner() +
-      (this.screen === "landing"
+      this.screen === "landing"
         ? this.renderLanding()
         : this.screen === "lobby"
           ? this.renderLobby()
-          : this.renderPlay());
+          : this.renderPlay();
     this.mountedScreen = this.screen;
     this.bind();
     this.ensureBoardDelegation();
@@ -1803,16 +1803,6 @@ class App {
         this.root.querySelector(".landing-preview")?.classList.remove("is-settling");
       }, 700);
     }
-  }
-
-  private renderIosInstallBanner(): string {
-    if (!shouldShowIosInstallPrompt()) return "";
-    return `
-      <div class="ios-install-banner" role="status">
-        <p>Add yacewo to your Home Screen to get move notifications</p>
-        <button type="button" class="text-btn" data-action="dismiss-ios-install">Dismiss</button>
-      </div>
-    `;
   }
 
   /** One-time click handlers for squares / promotion (survive board patches). */
@@ -2115,13 +2105,6 @@ class App {
       }
       this.render();
     });
-
-    this.root
-      .querySelector("[data-action='dismiss-ios-install']")
-      ?.addEventListener("click", () => {
-        dismissIosInstallPrompt();
-        this.root.querySelector(".ios-install-banner")?.remove();
-      });
 
     this.root.querySelector("[data-action='theme']")?.addEventListener("click", () => {
       unlockAudio();

@@ -1287,6 +1287,10 @@ html[data-theme="dark"] .primary-btn {
   line-height: 1.4;
 }
 
+.lobby-hint + .lobby-hint {
+  margin-top: 0.35rem;
+}
+
 .lobby-actions {
   display: flex;
   gap: 0.75rem;
@@ -2508,32 +2512,4 @@ html[data-theme="dark"] .primary-btn {
     --board-mode-gap: clamp(1.1rem, 0.75rem + 2vh, 2.25rem);
     --landing-chrome: 22rem;
   }
-}
-
-.ios-install-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin: 0.5rem 0.75rem 0;
-  padding: 0.65rem 0.85rem;
-  border-radius: 0.65rem;
-  background: var(--glass-strong);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(var(--frost-blur));
-  -webkit-backdrop-filter: blur(var(--frost-blur));
-  font-family: var(--font-ui);
-  font-size: 0.82rem;
-  color: var(--ink);
-  line-height: 1.35;
-}
-
-.ios-install-banner p {
-  margin: 0;
-  flex: 1;
-}
-
-.ios-install-banner .text-btn {
-  flex-shrink: 0;
-  color: var(--ink-muted);
 }
