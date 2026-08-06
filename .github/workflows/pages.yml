@@ -36,6 +36,7 @@ jobs:
       - name: Build site into docs/
         env:
           VITE_YACEWO_ROOMS_URL: ${{ vars.VITE_YACEWO_ROOMS_URL }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
         run: |
           export VITE_YACEWO_ROOMS_URL="${VITE_YACEWO_ROOMS_URL:-https://yacewo-rooms.yacewo-rooms.workers.dev}"
           opam exec -- make web

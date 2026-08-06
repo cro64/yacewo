@@ -39,7 +39,9 @@ export type NetMsg =
   | { type: "notation"; n: string; state?: ActionState }
   | { type: "undo"; state?: ActionState }
   | { type: "resign"; state?: ActionState }
-  | { type: "draw"; state?: ActionState };
+  | { type: "draw"; state?: ActionState }
+  /** Client → DO only; not relayed. */
+  | { type: "push-subscribe"; subscription: PushSubscriptionJSON };
 
 export type NetRole = "host" | "guest";
 
@@ -59,7 +61,10 @@ export type NetHandlers = {
   onAction: (
     msg: Exclude<
       NetMsg,
-      { type: "hello" } | { type: "ready" } | { type: "sync" }
+      | { type: "hello" }
+      | { type: "ready" }
+      | { type: "sync" }
+      | { type: "push-subscribe" }
     >,
   ) => void;
   /** Own socket failed after retries — tear down / retry at the app layer. */
@@ -225,6 +230,21 @@ export class NetSession {
     this.ws.send(JSON.stringify(msg));
   }
 
+  /** Best-effort: subscribe (or reuse) and tell the DO. Safe to call often. */
+  async sendPushSubscription(
+    subscription?: PushSubscriptionJSON | null,
+  ): Promise<void> {
+    try {
+      const { subscribeToPush } = await import("./push");
+      const sub =
+        subscription === undefined ? await subscribeToPush() : subscription;
+      if (!sub || !this.isConnected()) return;
+      this.send({ type: "push-subscribe", subscription: sub });
+    } catch {
+      /* push is optional */
+    }
+  }
+
   destroy(): void {
     this.disposed = true;
     this.intentionalClose = true;
@@ -289,6 +309,10 @@ export class NetSession {
         settled = true;
         sessionOpen = true;
         this.reconnectAttempt = 0;
+        // Re-attach push after reconnects when permission is already granted.
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          void this.sendPushSubscription();
+        }
         resolve();
       };
       const finishErr = (err: Error) => {
@@ -447,6 +471,8 @@ export class NetSession {
         return;
       case "ready":
         this.handlers.onReady();
+        return;
+      case "push-subscribe":
         return;
       default:
         this.handlers.onAction(netMsg);

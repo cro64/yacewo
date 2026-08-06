@@ -152,12 +152,16 @@ Finished games die after 15 minutes. Idle unfinished rooms after 24 hours.
    (already set). Copy the printed URL, e.g.
    `https://yacewo-rooms.<subdomain>.workers.dev`.
 
-2. **Point the UI at it** before building (Vite bakes the URL in at build time):
+2. **Point the UI at it** before building (Vite bakes values in at build time):
 
    ```sh
    # web/ui/.env.local (gitignored)
    VITE_YACEWO_ROOMS_URL=https://yacewo-rooms.<subdomain>.workers.dev
+   VITE_VAPID_PUBLIC_KEY=<from npx @pushforge/builder vapid>
    ```
+
+   Set the matching private key on the Worker (`wrangler secret put
+   VAPID_PRIVATE_KEY`). Details in [yacewo-worker/README.md](yacewo-worker/README.md).
 
 3. **Build / run**
 
@@ -168,8 +172,8 @@ Finished games die after 15 minutes. Idle unfinished rooms after 24 hours.
 
    Pushing to `main` runs `.github/workflows/pages.yml`, which rebuilds the site
    and deploys it. Repo **Settings → Pages → Source** must be **GitHub Actions**
-   (not the `/docs` folder on a branch). Optionally set repository variable
-   `VITE_YACEWO_ROOMS_URL` if the Worker URL changes.
+   (not the `/docs` folder on a branch). Optionally set repository variables
+   `VITE_YACEWO_ROOMS_URL` and `VITE_VAPID_PUBLIC_KEY` if they change.
 
    Two players need separate browser profiles (or incognito). Same profile
    reuses the room identity token and can't open two seats.

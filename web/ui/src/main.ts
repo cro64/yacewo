@@ -33,11 +33,19 @@ import {
   toggleSound,
   unlockAudio,
 } from "./sound";
+import { subscribeToPush } from "./push";
+import {
+  dismissIosInstallPrompt,
+  shouldShowIosInstallPrompt,
+} from "./iosPrompt";
 
 type Screen = "landing" | "lobby" | "play";
 type ActionMsg = Exclude<
   NetMsg,
-  { type: "hello" } | { type: "ready" } | { type: "sync" }
+  | { type: "hello" }
+  | { type: "ready" }
+  | { type: "sync" }
+  | { type: "push-subscribe" }
 >;
 
 /** Text-presentation selector — keeps pieces monochrome so CSS color works on iOS. */
@@ -900,6 +908,8 @@ class App {
   private async createRemoteRoom() {
     this.error = "";
     this.joinOpen = false;
+    // Start while we still have the click gesture (Notification permission).
+    const pushPromise = subscribeToPush().catch(() => null);
     try {
       const setup = this.captureSetup();
       this.remoteSetup = setup;
@@ -907,6 +917,8 @@ class App {
       this.render();
       const room = await this.ensureNet().createRoom();
       syncRoomInUrl(room);
+      const sub = await pushPromise;
+      await this.net?.sendPushSubscription(sub);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
       this.teardownRemote(true);
@@ -925,11 +937,14 @@ class App {
       this.render();
       return;
     }
+    const pushPromise = subscribeToPush().catch(() => null);
     syncRoomInUrl(code);
     this.screen = "lobby";
     this.render();
     try {
       await this.ensureNet().joinRoom(code);
+      const sub = await pushPromise;
+      await this.net?.sendPushSubscription(sub);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.teardownRemote(true);
@@ -1771,11 +1786,12 @@ class App {
     }
 
     this.root.innerHTML =
-      this.screen === "landing"
+      this.renderIosInstallBanner() +
+      (this.screen === "landing"
         ? this.renderLanding()
         : this.screen === "lobby"
           ? this.renderLobby()
-          : this.renderPlay();
+          : this.renderPlay());
     this.mountedScreen = this.screen;
     this.bind();
     this.ensureBoardDelegation();
@@ -1785,6 +1801,16 @@ class App {
         this.root.querySelector(".landing-preview")?.classList.remove("is-settling");
       }, 700);
     }
+  }
+
+  private renderIosInstallBanner(): string {
+    if (!shouldShowIosInstallPrompt()) return "";
+    return `
+      <div class="ios-install-banner" role="status">
+        <p>Add yacewo to your Home Screen to get move notifications</p>
+        <button type="button" class="text-btn" data-action="dismiss-ios-install">Dismiss</button>
+      </div>
+    `;
   }
 
   /** One-time click handlers for squares / promotion (survive board patches). */
@@ -2085,6 +2111,13 @@ class App {
       }
       this.render();
     });
+
+    this.root
+      .querySelector("[data-action='dismiss-ios-install']")
+      ?.addEventListener("click", () => {
+        dismissIosInstallPrompt();
+        this.root.querySelector(".ios-install-banner")?.remove();
+      });
 
     this.root.querySelector("[data-action='theme']")?.addEventListener("click", () => {
       unlockAudio();

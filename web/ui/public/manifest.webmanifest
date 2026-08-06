@@ -1,0 +1,16 @@
+{
+  "name": "yacewo",
+  "short_name": "yacewo",
+  "display": "standalone",
+  "start_url": "./",
+  "background_color": "#e2efe0",
+  "theme_color": "#3f6a48",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

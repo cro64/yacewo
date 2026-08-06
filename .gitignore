@@ -17,6 +17,8 @@ web/ui/dist/
 web/ui/.vite/
 yacewo-worker/node_modules/
 yacewo-worker/.wrangler/
+yacewo-worker/.dev.vars
+
 *.local
 
 # Generated engine copy for local Vite (rebuilt by `make web-engine`).

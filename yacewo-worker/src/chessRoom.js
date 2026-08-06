@@ -3,6 +3,8 @@
 // Cloudflare keeps client sockets open while the isolate sleeps.
 // Message shapes mirror web/ui/src/net.ts (NetMsg).
 
+import { buildPushHTTPRequest } from "@pushforge/builder";
+
 const MAX_PLAYERS = 2;
 
 /** Finished games are cleared quickly; abandoned/in-progress rooms linger. */
@@ -28,6 +30,10 @@ function emptyRoom() {
     moveList: "",
     status: "waiting", // waiting | active | finished
     playerTokens: { host: null, guest: null },
+    /** @type {{ host: object | null, guest: object | null }} */
+    pushSubscriptions: { host: null, guest: null },
+    /** Room code from /room/:id — used in push navigate URLs. */
+    roomId: null,
   };
 }
 
@@ -99,6 +105,20 @@ function applyMessage(room, msg) {
   }
 }
 
+function isMoveNotifyType(type) {
+  return type === "move" || type === "castle" || type === "notation";
+}
+
+function isPushSubscription(raw) {
+  if (!raw || typeof raw !== "object") return false;
+  if (typeof raw.endpoint !== "string" || !raw.endpoint.startsWith("https://")) {
+    return false;
+  }
+  const keys = raw.keys;
+  if (!keys || typeof keys !== "object") return false;
+  return typeof keys.p256dh === "string" && typeof keys.auth === "string";
+}
+
 function safeSend(ws, payload) {
   try {
     ws.send(typeof payload === "string" ? payload : JSON.stringify(payload));
@@ -130,6 +150,10 @@ export class ChessRoom {
     if (this.room) return this.room;
     const stored = await this.state.storage.get("room");
     this.room = stored ?? emptyRoom();
+    // Older rooms may predate push fields.
+    if (!this.room.pushSubscriptions) {
+      this.room.pushSubscriptions = { host: null, guest: null };
+    }
     return this.room;
   }
 
@@ -171,6 +195,13 @@ export class ChessRoom {
       if (ws === except) continue;
       safeSend(ws, payload);
     }
+  }
+
+  roleConnected(role) {
+    for (const ws of this.state.getWebSockets()) {
+      if (this.attachment(ws)?.role === role) return true;
+    }
+    return false;
   }
 
   /** Accept then immediately fail so the client can read the error. */
@@ -247,6 +278,70 @@ export class ChessRoom {
     if (role) this.broadcast({ type: "peer_left", role }, ws);
   }
 
+  // ── push ─────────────────────────────────────────────────────────
+
+  roomShareUrl(roomId) {
+    const origin = (this.env.SITE_ORIGIN || "").replace(/\/$/, "");
+    if (!origin || !roomId) return null;
+    return `${origin}/?room=${encodeURIComponent(roomId)}`;
+  }
+
+  async notifyOpponent(sessionRole) {
+    const room = this.room;
+    if (!room) return;
+
+    const opponentRole = sessionRole === "host" ? "guest" : "host";
+    if (this.roleConnected(opponentRole)) return;
+
+    const sub = room.pushSubscriptions?.[opponentRole];
+    if (!isPushSubscription(sub)) return;
+
+    const privateKey = this.env.VAPID_PRIVATE_KEY;
+    if (!privateKey) return;
+
+    const navigate = this.roomShareUrl(room.roomId);
+    const origin = (this.env.SITE_ORIGIN || "").replace(/\/$/, "");
+    const mover = sessionRole === "host" ? "White" : "Black";
+    const payload = {
+      web_push: 8030,
+      notification: {
+        title: "Your move",
+        body: `${mover} just moved`,
+        ...(navigate ? { navigate } : {}),
+        ...(origin ? { icon: `${origin}/icon.png` } : {}),
+        app_badge: 1,
+      },
+    };
+
+    let privateJWK;
+    try {
+      privateJWK =
+        typeof privateKey === "string" ? JSON.parse(privateKey) : privateKey;
+    } catch {
+      return;
+    }
+
+    try {
+      const { endpoint, headers, body } = await buildPushHTTPRequest({
+        privateJWK,
+        subscription: sub,
+        message: {
+          payload,
+          adminContact: this.env.VAPID_SUBJECT || "mailto:yacewo@example.com",
+          options: { urgency: "high", ttl: 3600 },
+        },
+      });
+
+      const res = await fetch(endpoint, { method: "POST", headers, body });
+      if (res.status === 404 || res.status === 410) {
+        room.pushSubscriptions[opponentRole] = null;
+        await this.saveRoom();
+      }
+    } catch {
+      /* push failures must not break move relay */
+    }
+  }
+
   // ── Durable Object entrypoints ───────────────────────────────────
 
   async fetch(request) {
@@ -269,6 +364,11 @@ export class ChessRoom {
     this.kickTokenSessions(token);
 
     const room = await this.loadRoom();
+    const pathMatch = url.pathname.match(/\/room\/([^/]+)\/?$/);
+    if (pathMatch) {
+      room.roomId = decodeURIComponent(pathMatch[1]).toUpperCase();
+    }
+
     const seat = assignSeat(room, token, intent);
     if (seat.error) {
       return this.rejectSocket(seat.error, seat.code);
@@ -294,10 +394,26 @@ export class ChessRoom {
     }
 
     const room = await this.loadRoom();
+
+    if (msg.type === "push-subscribe") {
+      if (!isPushSubscription(msg.subscription)) return;
+      room.pushSubscriptions = room.pushSubscriptions ?? {
+        host: null,
+        guest: null,
+      };
+      room.pushSubscriptions[att.role] = msg.subscription;
+      await this.saveRoom();
+      return; // never relay
+    }
+
     if (!applyMessage(room, msg)) return;
 
     await this.saveRoom();
     this.broadcast(msg, ws);
+
+    if (isMoveNotifyType(msg.type)) {
+      await this.notifyOpponent(att.role);
+    }
   }
 
   async webSocketClose(ws, code, reason) {

@@ -2,6 +2,12 @@ name = "yacewo-rooms"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
+# Public site origin used in push notification navigate/icon URLs.
+# Override per-env if needed; private VAPID key is a secret (see README).
+[vars]
+SITE_ORIGIN = "https://cro64.github.io/yacewo"
+VAPID_SUBJECT = "mailto:yacewo@cro64.github.io"
+
 [[durable_objects.bindings]]
 name = "CHESS_ROOM"
 class_name = "ChessRoom"
