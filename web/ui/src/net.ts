@@ -16,11 +16,13 @@ export type GameSetup =
   | { kind: "horde" }
   | { kind: "fen"; fen: string };
 
-// `state` is a lightweight fen/moveList snapshot piggybacked onto every
-// action so relays (e.g. the Cloudflare Worker/DO transport) can stay
+// `state` is a lightweight fen/moveList/highlight snapshot piggybacked onto
+// every action so relays (e.g. the Cloudflare Worker/DO transport) can stay
 // current for reconnect-sync without running move validation themselves.
-// Receiving clients ignore it — they already recompute via api.applyMove().
-type ActionState = { fen: string; moveList: string };
+// `highlight` is the exact from/to of the move as computed by whoever made
+// it — lets reconnecting clients show the real last move instead of guessing.
+type MoveHighlight = { from: string; to: string };
+type ActionState = { fen: string; moveList: string; highlight: MoveHighlight | null };
 
 export type NetMsg =
   | { type: "hello"; setup: GameSetup }
@@ -33,6 +35,7 @@ export type NetMsg =
       /** Present on DO catch-up so rejoins restore mode (not only FEN). */
       setup?: GameSetup;
       role?: NetRole;
+      lastHighlight?: MoveHighlight | null;
     }
   | { type: "move"; from: string; to: string; promo: string | null; state?: ActionState }
   | { type: "castle"; side: string; from?: string; state?: ActionState }
@@ -486,6 +489,18 @@ function parseRole(raw: unknown): NetRole | null {
   return raw === "host" || raw === "guest" ? raw : null;
 }
 
+/** undefined = field absent (older peer, don't touch caller default). */
+function parseHighlight(raw: unknown): MoveHighlight | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.from === "string" && typeof r.to === "string") {
+    return { from: r.from, to: r.to };
+  }
+  return null;
+}
+
 function parseMsg(msg: Record<string, unknown>): NetMsg | null {
   switch (msg.type) {
     case "hello": {
@@ -510,6 +525,7 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
       }
       const role = parseRole(msg.role);
       const setup = msg.setup != null ? parseSetup(msg.setup) : null;
+      const lastHighlight = parseHighlight(msg.lastHighlight);
       return {
         type: "sync",
         fen: msg.fen.trim(),
@@ -517,6 +533,7 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
         moveList: msg.moveList,
         ...(setup ? { setup } : {}),
         ...(role ? { role } : {}),
+        ...(lastHighlight !== undefined ? { lastHighlight } : {}),
       };
     }
     case "move":

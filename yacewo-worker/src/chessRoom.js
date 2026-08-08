@@ -28,6 +28,8 @@ function emptyRoom() {
     fen: null,
     seed: null,
     moveList: "",
+    /** Exact from/to of the last move — persisted for reconnect highlight. */
+    lastHighlight: null,
     status: "waiting", // waiting | active | finished
     playerTokens: { host: null, guest: null },
     /** @type {{ host: object | null, guest: object | null }} */
@@ -85,6 +87,7 @@ function applyMessage(room, msg) {
       room.seed = msg.seed ?? null;
       room.moveList = msg.moveList ?? room.moveList;
       if (msg.setup) room.setup = msg.setup;
+      if ("lastHighlight" in msg) room.lastHighlight = msg.lastHighlight;
       if (room.setup || room.fen) room.status = "active";
       return true;
     case "move":
@@ -95,6 +98,9 @@ function applyMessage(room, msg) {
       if (msg.state?.fen) room.fen = msg.state.fen;
       if (typeof msg.state?.moveList === "string") {
         room.moveList = msg.state.moveList;
+      }
+      if (msg.state && "highlight" in msg.state) {
+        room.lastHighlight = msg.state.highlight;
       }
       if (msg.type === "resign" || msg.type === "draw") {
         room.status = "finished";
@@ -150,9 +156,12 @@ export class ChessRoom {
     if (this.room) return this.room;
     const stored = await this.state.storage.get("room");
     this.room = stored ?? emptyRoom();
-    // Older rooms may predate push fields.
+    // Older rooms may predate push / highlight fields.
     if (!this.room.pushSubscriptions) {
       this.room.pushSubscriptions = { host: null, guest: null };
+    }
+    if (!("lastHighlight" in this.room)) {
+      this.room.lastHighlight = null;
     }
     return this.room;
   }
@@ -252,6 +261,7 @@ export class ChessRoom {
         moveList: room.moveList,
         ...(room.setup ? { setup: room.setup } : {}),
         role,
+        lastHighlight: room.lastHighlight,
       });
       return;
     }

@@ -27,6 +27,7 @@ import {
 } from "./theme";
 import {
   isSoundOn,
+  lastSanToken,
   play,
   playMoveOutcome,
   soundLabel,
@@ -472,27 +473,66 @@ class App {
     };
   }
 
-  private noteActionHighlight(msg: ActionMsg | null) {
-    if (!msg) return;
+  /** Notation moves lack explicit from/to — diff board before/after at source. */
+  private computeNotationHighlight(
+    before: GameSnapshot,
+    after: GameSnapshot,
+  ): { from: string; to: string } | null {
+    const san = lastSanToken(after.moveList);
+    if (san && /^O-O(-O)?$/.test(san.replace(/[+#]/g, ""))) {
+      return this.castleHighlight(
+        san.startsWith("O-O-O") ? "queen" : "king",
+        before.turn,
+      );
+    }
+    let from: string | null = null;
+    let to: string | null = null;
+    for (let i = 0; i < 64; i++) {
+      const b = before.board[i];
+      const a = after.board[i];
+      if (b && b.color === before.turn && !a) {
+        from = fileRank(i).alg;
+      }
+      if (a && a.color === before.turn) {
+        const same = b && b.kind === a.kind && b.color === a.color;
+        if (!same) to = fileRank(i).alg;
+      }
+    }
+    return from && to ? { from, to } : null;
+  }
+
+  /** Record last-move highlight and return it for relay to opponent/DO. */
+  private noteActionHighlight(
+    before: GameSnapshot | null,
+    msg: ActionMsg | null,
+    after: GameSnapshot | null,
+  ): { from: string; to: string } | null {
+    if (!msg) return null;
+    let highlight: { from: string; to: string } | null = null;
     switch (msg.type) {
       case "undo":
         this.lastMoves.pop();
-        break;
+        return null;
       case "move":
-        this.lastMoves.push({ from: msg.from, to: msg.to });
+        highlight = { from: msg.from, to: msg.to };
+        this.lastMoves.push(highlight);
         break;
       case "castle":
-        if (this.game) {
-          this.lastMoves.push(this.castleHighlight(msg.side, this.game.turn));
+        if (before) {
+          highlight = this.castleHighlight(msg.side, before.turn);
+          this.lastMoves.push(highlight);
         }
         break;
       case "notation":
-        // No from/to from the notation API — drop the highlight.
-        this.lastMoves = [];
+        if (before && after) {
+          highlight = this.computeNotationHighlight(before, after);
+        }
+        this.lastMoves = highlight ? [highlight] : [];
         break;
       default:
         break;
     }
+    return highlight;
   }
 
   private clearMoveHighlights() {
@@ -597,6 +637,7 @@ class App {
                 seed: this.game.seed,
                 moveList: this.game.moveList,
                 setup: this.remoteSetup,
+                lastHighlight: this.lastMoves[this.lastMoves.length - 1] ?? null,
               });
               this.reconnecting = false;
               this.error = "";
@@ -612,6 +653,7 @@ class App {
                   seed: this.game.seed,
                   moveList: this.game.moveList,
                   setup: this.remoteSetup,
+                  lastHighlight: null,
                 });
               }
             }
@@ -772,7 +814,7 @@ class App {
     }
 
     this.reconnecting = false;
-    this.clearMoveHighlights();
+    this.lastMoves = msg.lastHighlight ? [msg.lastHighlight] : [];
     this.setGame(game);
     this.screen = "play";
     this.error = "";
@@ -791,13 +833,16 @@ class App {
     }
   }
 
-  private sendAction(msg: ActionMsg) {
+  private sendAction(
+    msg: ActionMsg,
+    highlight: { from: string; to: string } | null,
+  ) {
     if (!this.isRemote() || !this.net || !this.isNetLive()) return;
-    // Piggyback the post-move fen/moveList so a DO-backed transport (or any
-    // relay) can persist current state without re-deriving it — this.game
-    // already reflects the applied action by the time sendAction runs.
     const withState: ActionMsg = this.game
-      ? { ...msg, state: { fen: this.game.fen, moveList: this.game.moveList } }
+      ? {
+          ...msg,
+          state: { fen: this.game.fen, moveList: this.game.moveList, highlight },
+        }
       : msg;
     try {
       this.net.send(withState);
@@ -853,11 +898,12 @@ class App {
       this.render();
       return;
     }
-    this.noteActionHighlight(msg);
+    const before = this.game;
+    const highlight = this.noteActionHighlight(before, msg, result.game);
     this.setGame(result.game);
     this.screen = "play";
     this.soundForAction(msg, result.game);
-    if (msg) this.sendAction(msg);
+    if (msg) this.sendAction(msg, highlight);
     this.render();
   }
 
@@ -897,7 +943,8 @@ class App {
       this.render();
       return;
     }
-    this.noteActionHighlight(msg);
+    const before = this.game;
+    this.noteActionHighlight(before, msg, result.game);
     this.setGame(result.game);
     this.soundForAction(msg, result.game);
     this.render();
@@ -2384,15 +2431,20 @@ class App {
         this.render();
         return;
       }
+      const before = this.game;
+      const highlight = this.noteActionHighlight(
+        before,
+        { type: "notation", n: trimmed },
+        result.game,
+      );
       this.setGame(result.game);
-      this.clearMoveHighlights();
       this.notation = "";
       playMoveOutcome({
         kind: "notation",
         moveList: result.game.moveList,
         statusTag: result.game.status.tag,
       });
-      this.sendAction({ type: "notation", n: trimmed });
+      this.sendAction({ type: "notation", n: trimmed }, highlight);
       this.render();
     });
 
