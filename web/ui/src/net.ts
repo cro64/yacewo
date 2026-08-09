@@ -44,7 +44,9 @@ export type NetMsg =
   | { type: "resign"; state?: ActionState }
   | { type: "draw"; state?: ActionState }
   /** Client → DO only; not relayed. */
-  | { type: "push-subscribe"; subscription: PushSubscriptionJSON };
+  | { type: "push-subscribe"; subscription: PushSubscriptionJSON }
+  /** Client → DO only; not relayed. Tells the DO whether to skip push (tab is foreground). */
+  | { type: "visibility"; visible: boolean };
 
 export type NetRole = "host" | "guest";
 
@@ -68,6 +70,7 @@ export type NetHandlers = {
       | { type: "ready" }
       | { type: "sync" }
       | { type: "push-subscribe" }
+      | { type: "visibility" }
     >,
   ) => void;
   /** Own socket failed after retries — tear down / retry at the app layer. */
@@ -169,9 +172,23 @@ export class NetSession {
   private sawPeer = false;
   /** Reconnects use join — seat is already claimed by token. */
   private intent: ConnectIntent = "join";
+  private readonly onVisibilityChange = () => {
+    this.sendVisibility(document.visibilityState === "visible");
+  };
 
   constructor(handlers: NetHandlers) {
     this.handlers = handlers;
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+  }
+
+  /** Best-effort: tell the DO whether this tab is foreground (skip push while true). */
+  private sendVisibility(visible: boolean): void {
+    if (!this.isConnected()) return;
+    try {
+      this.send({ type: "visibility", visible });
+    } catch {
+      /* best-effort */
+    }
   }
 
   getRoom(): string {
@@ -253,6 +270,7 @@ export class NetSession {
     this.intentionalClose = true;
     this.clearReconnectTimer();
     this.teardownSocket(true);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.handlers.onStatus({ phase: "idle" });
   }
 
@@ -316,6 +334,7 @@ export class NetSession {
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           void this.sendPushSubscription();
         }
+        this.sendVisibility(document.visibilityState === "visible");
         resolve();
       };
       const finishErr = (err: Error) => {
@@ -476,6 +495,7 @@ export class NetSession {
         this.handlers.onReady();
         return;
       case "push-subscribe":
+      case "visibility":
         return;
       default:
         this.handlers.onAction(netMsg);

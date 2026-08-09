@@ -206,9 +206,17 @@ export class ChessRoom {
     }
   }
 
-  roleConnected(role) {
+  /**
+   * True only if the role has a live socket whose client last reported
+   * itself foreground/visible. A live-but-backgrounded socket (common on
+   * iOS, which doesn't close the connection right when a PWA is
+   * backgrounded) does not count — the opponent won't see a live update,
+   * so they still need the push.
+   */
+  roleActivelyVisible(role) {
     for (const ws of this.state.getWebSockets()) {
-      if (this.attachment(ws)?.role === role) return true;
+      const att = this.attachment(ws);
+      if (att?.role === role && att.visible !== false) return true;
     }
     return false;
   }
@@ -301,7 +309,7 @@ export class ChessRoom {
     if (!room) return;
 
     const opponentRole = sessionRole === "host" ? "guest" : "host";
-    if (this.roleConnected(opponentRole)) return;
+    if (this.roleActivelyVisible(opponentRole)) return;
 
     const sub = room.pushSubscriptions?.[opponentRole];
     if (!isPushSubscription(sub)) return;
@@ -346,9 +354,11 @@ export class ChessRoom {
       if (res.status === 404 || res.status === 410) {
         room.pushSubscriptions[opponentRole] = null;
         await this.saveRoom();
+      } else if (!res.ok) {
+        console.error("[push] send failed", res.status, await res.text());
       }
-    } catch {
-      /* push failures must not break move relay */
+    } catch (err) {
+      console.error("[push] send threw", err);
     }
   }
 
@@ -413,6 +423,12 @@ export class ChessRoom {
       };
       room.pushSubscriptions[att.role] = msg.subscription;
       await this.saveRoom();
+      return; // never relay
+    }
+
+    if (msg.type === "visibility") {
+      if (typeof msg.visible !== "boolean") return;
+      ws.serializeAttachment({ ...att, visible: msg.visible });
       return; // never relay
     }
 

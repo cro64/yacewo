@@ -45,6 +45,7 @@ type ActionMsg = Exclude<
   | { type: "ready" }
   | { type: "sync" }
   | { type: "push-subscribe" }
+  | { type: "visibility" }
 >;
 
 /** Text-presentation selector — keeps pieces monochrome so CSS color works on iOS. */
