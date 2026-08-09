@@ -318,7 +318,7 @@ export class ChessRoom {
         title: "Your move",
         body: `${mover} just moved`,
         ...(navigate ? { navigate } : {}),
-        ...(origin ? { icon: `${origin}/icon.png` } : {}),
+        ...(origin ? { icon: `${origin}/icon-192.png` } : {}),
         app_badge: 1,
       },
     };
