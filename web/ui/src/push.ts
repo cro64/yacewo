@@ -13,7 +13,7 @@ function urlBase64ToUint8Array(base64: string): BufferSource {
 
 function swUrl(): string {
   const base = import.meta.env.BASE_URL || "/";
-  return new URL("sw.js", base).pathname;
+  return `${base.replace(/\/$/, "")}/sw.js`;
 }
 
 /** Ask permission + subscribe. Returns null when unsupported or denied. */

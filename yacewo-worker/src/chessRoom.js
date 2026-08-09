@@ -309,13 +309,22 @@ export class ChessRoom {
     if (!room) return;
 
     const opponentRole = sessionRole === "host" ? "guest" : "host";
-    if (this.roleActivelyVisible(opponentRole)) return;
+    if (this.roleActivelyVisible(opponentRole)) {
+      console.log("[push] skipped: opponent role is actively visible", opponentRole);
+      return;
+    }
 
     const sub = room.pushSubscriptions?.[opponentRole];
-    if (!isPushSubscription(sub)) return;
+    if (!isPushSubscription(sub)) {
+      console.log("[push] skipped: no subscription for", opponentRole);
+      return;
+    }
 
     const privateKey = this.env.VAPID_PRIVATE_KEY;
-    if (!privateKey) return;
+    if (!privateKey) {
+      console.log("[push] skipped: no VAPID_PRIVATE_KEY bound");
+      return;
+    }
 
     const navigate = this.roomShareUrl(room.roomId);
     const origin = (this.env.SITE_ORIGIN || "").replace(/\/$/, "");
@@ -351,6 +360,7 @@ export class ChessRoom {
       });
 
       const res = await fetch(endpoint, { method: "POST", headers, body });
+      console.log("[push] sent, status", res.status);
       if (res.status === 404 || res.status === 410) {
         room.pushSubscriptions[opponentRole] = null;
         await this.saveRoom();
@@ -429,6 +439,7 @@ export class ChessRoom {
     if (msg.type === "visibility") {
       if (typeof msg.visible !== "boolean") return;
       ws.serializeAttachment({ ...att, visible: msg.visible });
+      console.log("[push] visibility set", att.role, msg.visible);
       return; // never relay
     }
 
