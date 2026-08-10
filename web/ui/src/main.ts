@@ -14,7 +14,9 @@ import {
   normalizeRoom,
   type GameSetup,
   type NetMsg,
+  type NetRole,
   type NetStatus,
+  type PendingOffer,
   type QueerVariant,
 } from "./net";
 import {
@@ -364,6 +366,10 @@ class App {
   /** Set in remote games; null means local hotseat. */
   private myColor: Color | null = null;
   private remoteSetup: GameSetup | null = null;
+  /** Remote takeback negotiation: I asked, waiting on opponent. */
+  private awaitingUndoResponse = false;
+  /** Remote takeback negotiation: opponent asked, waiting on me. */
+  private incomingUndoRequest = false;
   /** Own transport reconnect in progress (NetSession owns the retries). */
   private reconnecting = false;
   /** Which copy button briefly shows “Copied”. */
@@ -443,6 +449,12 @@ class App {
     return this.myColor != null;
   }
 
+  /** Host is always white (see applySync) — null only in hotseat. */
+  private myRole(): NetRole | null {
+    if (this.myColor == null) return null;
+    return this.myColor === "white" ? "host" : "guest";
+  }
+
   /** Squares of critical pieces in check / checkmate. */
   private checkSquares(): string[] {
     if (!this.game) return [];
@@ -509,6 +521,9 @@ class App {
     after: GameSnapshot | null,
   ): { from: string; to: string } | null {
     if (!msg) return null;
+    // Any real ply — mine or the opponent's — moots a pending takeback ask.
+    this.awaitingUndoResponse = false;
+    this.incomingUndoRequest = false;
     let highlight: { from: string; to: string } | null = null;
     switch (msg.type) {
       case "undo":
@@ -803,6 +818,24 @@ class App {
     const role = msg.role ?? this.net?.getRole();
     this.myColor = role === "host" ? "white" : "black";
 
+    // Restore a pending draw offer / undo request that was live when this
+    // room was left. Draw-offer flags live only in engine memory (not FEN),
+    // so re-invoke the same offerDraw() call the Draw button already makes —
+    // it just flips the flag for whichever color is to move, and turn hasn't
+    // changed since the offer was persisted (no moves happened in between).
+    if (msg.pendingOffer?.kind === "draw") {
+      const withOffer = this.api.offerDraw();
+      if (withOffer.ok && withOffer.game) {
+        game = { ...withOffer.game, seed: game.seed, moveList: game.moveList };
+      }
+    }
+    this.awaitingUndoResponse = false;
+    this.incomingUndoRequest = false;
+    if (msg.pendingOffer?.kind === "undo") {
+      if (msg.pendingOffer.from === this.myRole()) this.awaitingUndoResponse = true;
+      else this.incomingUndoRequest = true;
+    }
+
     if (setup) {
       this.applyRemoteSetup(setup, game.seed);
     } else {
@@ -834,6 +867,21 @@ class App {
     }
   }
 
+  /** What's negotiably pending right now, for the DO to persist for reconnect. */
+  private pendingOfferForRoom(): PendingOffer {
+    if (!this.game || this.game.isOver) return null;
+    if (this.game.whiteDrawOffer !== this.game.blackDrawOffer) {
+      return { kind: "draw", from: this.game.whiteDrawOffer ? "host" : "guest" };
+    }
+    const role = this.myRole();
+    if (!role) return null;
+    if (this.awaitingUndoResponse) return { kind: "undo", from: role };
+    if (this.incomingUndoRequest) {
+      return { kind: "undo", from: role === "host" ? "guest" : "host" };
+    }
+    return null;
+  }
+
   private sendAction(
     msg: ActionMsg,
     highlight: { from: string; to: string } | null,
@@ -842,7 +890,13 @@ class App {
     const withState: ActionMsg = this.game
       ? {
           ...msg,
-          state: { fen: this.game.fen, moveList: this.game.moveList, highlight },
+          state: {
+            fen: this.game.fen,
+            moveList: this.game.moveList,
+            highlight,
+            pendingOffer: this.pendingOfferForRoom(),
+            isOver: this.game.isOver,
+          },
         }
       : msg;
     try {
@@ -908,6 +962,17 @@ class App {
     this.render();
   }
 
+  private acceptUndoRequest() {
+    this.incomingUndoRequest = false;
+    this.tryLocalAction(this.api.undo(), { type: "undo" });
+  }
+
+  private declineUndoRequest() {
+    this.incomingUndoRequest = false;
+    this.sendAction({ type: "undo_decline" }, null);
+    this.render();
+  }
+
   private applyRemoteAction(msg: ActionMsg) {
     if (!this.game) return;
     let result: EngineResult;
@@ -925,7 +990,26 @@ class App {
         result = this.api.applyNotation(msg.n);
         break;
       case "undo":
-        // Undo is disabled for remote play; ignore stale peers.
+        // Accepted takeback. If we've since moved (or never asked), this is
+        // stale relative to our position — ignore it rather than desync.
+        if (!this.awaitingUndoResponse) return;
+        this.awaitingUndoResponse = false;
+        result = this.api.undo();
+        break;
+      case "undo_request":
+        if (this.awaitingUndoResponse) {
+          // Both sides asked at once — treat as mutual consent and resolve
+          // now; the peer runs the identical branch and converges the same way.
+          this.acceptUndoRequest();
+          return;
+        }
+        this.incomingUndoRequest = true;
+        play("offer");
+        this.render();
+        return;
+      case "undo_decline":
+        this.awaitingUndoResponse = false;
+        this.render();
         return;
       case "resign":
         result = this.api.resign();
@@ -1622,7 +1706,7 @@ class App {
       "Draw offers or accepts; decline by moving.",
     ];
     if (remote) {
-      items.push("Host is White; undo is disabled online.");
+      items.push("Host is White; Undo requests a takeback — your opponent can accept or decline.");
     } else {
       items.push("Undo takes back the last half-move.");
     }
@@ -1719,7 +1803,11 @@ class App {
         ? this.netStatus.room
         : this.net?.getRoom() || "";
     const inputLocked = !this.isMyTurn();
-    const undoLocked = g.isOver || this.isRemote();
+    const undoLabel = this.awaitingUndoResponse ? "Waiting…" : "Undo";
+    const undoLocked =
+      g.isOver ||
+      (this.isRemote() &&
+        (!g.moveList.trim() || this.awaitingUndoResponse || this.incomingUndoRequest));
     const drawLocked =
       g.isOver || (this.isRemote() && !this.isMyTurn());
     const waitingRejoin =
@@ -1751,6 +1839,15 @@ class App {
           ${
             offer
               ? `<div class="draw-offer" role="status">${escapeHtml(offer)}</div>`
+              : ""
+          }
+          ${
+            this.incomingUndoRequest
+              ? `<div class="undo-request" role="status">
+                   <span>Opponent wants to take back the last move</span>
+                   <button type="button" class="text-btn" data-action="undo-accept">Accept</button>
+                   <button type="button" class="text-btn" data-action="undo-decline">Decline</button>
+                 </div>`
               : ""
           }
           ${this.renderBoard()}
@@ -1803,7 +1900,7 @@ class App {
           <div class="panel-actions">
             <button type="button" class="action-btn" data-action="undo" ${
               undoLocked ? "disabled" : ""
-            }>Undo</button>
+            }>${undoLabel}</button>
             <button type="button" class="action-btn${acceptDraw ? " draw-accept" : ""}" data-action="draw" ${
               drawLocked ? "disabled" : ""
             }>${drawLabel}</button>
@@ -1866,6 +1963,20 @@ class App {
         this.pendingPromo = null;
         this.clearSelection();
         this.render();
+        return;
+      }
+
+      // The undo-request banner is inserted/removed via syncPlayBanner's raw
+      // innerHTML swap, which carries no listeners — must handle its buttons
+      // through this delegation, same as cancel-promo/data-promo above.
+      const undoAccept = t.closest<HTMLElement>("[data-action='undo-accept']");
+      if (undoAccept && this.root.contains(undoAccept)) {
+        this.acceptUndoRequest();
+        return;
+      }
+      const undoDecline = t.closest<HTMLElement>("[data-action='undo-decline']");
+      if (undoDecline && this.root.contains(undoDecline)) {
+        this.declineUndoRequest();
         return;
       }
 
@@ -1974,11 +2085,20 @@ class App {
       const offerHtml = offer
         ? `<div class="draw-offer" role="status">${escapeHtml(offer)}</div>`
         : "";
+      const undoRequestHtml = this.incomingUndoRequest
+        ? `<div class="undo-request" role="status">
+             <span>Opponent wants to take back the last move</span>
+             <button type="button" class="text-btn" data-action="undo-accept">Accept</button>
+             <button type="button" class="text-btn" data-action="undo-decline">Decline</button>
+           </div>`
+        : "";
 
       this.syncPlayBanner(statusEl, ".remote-banner", bannerHtml);
       const afterBanner =
         boardWrap.querySelector(".remote-banner") ?? statusEl;
       this.syncPlayBanner(afterBanner, ".draw-offer", offerHtml);
+      const afterOffer = boardWrap.querySelector(".draw-offer") ?? afterBanner;
+      this.syncPlayBanner(afterOffer, ".undo-request", undoRequestHtml);
     }
 
     const plate = this.root.querySelector(".board-plate");
@@ -2036,11 +2156,17 @@ class App {
     );
     if (flipBtn) flipBtn.setAttribute("aria-pressed", String(this.autoFlip));
 
-    const undoLocked = g.isOver || this.isRemote();
+    const undoLocked =
+      g.isOver ||
+      (this.isRemote() &&
+        (!g.moveList.trim() || this.awaitingUndoResponse || this.incomingUndoRequest));
     const drawLocked = g.isOver || (this.isRemote() && !this.isMyTurn());
     const acceptDraw = canAcceptDraw(g, this.myColor);
     const undoBtn = this.root.querySelector<HTMLButtonElement>("[data-action='undo']");
-    if (undoBtn) undoBtn.disabled = undoLocked;
+    if (undoBtn) {
+      undoBtn.disabled = undoLocked;
+      undoBtn.textContent = this.awaitingUndoResponse ? "Waiting…" : "Undo";
+    }
     const drawBtn = this.root.querySelector<HTMLButtonElement>("[data-action='draw']");
     if (drawBtn) {
       drawBtn.disabled = drawLocked;
@@ -2450,7 +2576,23 @@ class App {
     });
 
     this.root.querySelector("[data-action='undo']")?.addEventListener("click", () => {
-      if (this.isRemote()) return;
+      if (this.isRemote()) {
+        const g = this.game;
+        if (
+          !g ||
+          g.isOver ||
+          !g.moveList.trim() ||
+          this.awaitingUndoResponse ||
+          this.incomingUndoRequest
+        ) {
+          return;
+        }
+        this.awaitingUndoResponse = true;
+        this.sendAction({ type: "undo_request" }, null);
+        play("offer");
+        this.render();
+        return;
+      }
       this.tryLocalAction(this.api.undo(), { type: "undo" });
     });
     this.root.querySelector("[data-action='resign']")?.addEventListener("click", () => {

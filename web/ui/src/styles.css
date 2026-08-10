@@ -1393,6 +1393,28 @@ html[data-theme="dark"] .primary-btn {
   text-align: center;
 }
 
+.undo-request {
+  width: calc(var(--board-size) + 2 * var(--plate-pad) + 2px + 1.75rem);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent-undo) 14%, var(--plate));
+  border: 1px solid color-mix(in srgb, var(--accent-undo) 35%, var(--plate-edge));
+  border-radius: 3px;
+  padding: 0.55rem 0.75rem;
+  text-align: center;
+}
+
+.undo-request .text-btn {
+  color: var(--accent-undo);
+}
+
 .action-btn.draw-accept {
   border-color: color-mix(in srgb, var(--accent-draw) 55%, var(--plate-edge));
   color: var(--accent-draw);

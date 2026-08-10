@@ -22,7 +22,17 @@ export type GameSetup =
 // `highlight` is the exact from/to of the move as computed by whoever made
 // it — lets reconnecting clients show the real last move instead of guessing.
 type MoveHighlight = { from: string; to: string };
-type ActionState = { fen: string; moveList: string; highlight: MoveHighlight | null };
+// A single in-flight negotiable ask (draw offer or undo request), persisted
+// room-side so a reconnecting client's `sync` catch-up can restore the
+// matching banner instead of it silently vanishing.
+export type PendingOffer = { kind: "draw" | "undo"; from: NetRole } | null;
+type ActionState = {
+  fen: string;
+  moveList: string;
+  highlight: MoveHighlight | null;
+  pendingOffer?: PendingOffer;
+  isOver?: boolean;
+};
 
 export type NetMsg =
   | { type: "hello"; setup: GameSetup }
@@ -36,11 +46,15 @@ export type NetMsg =
       setup?: GameSetup;
       role?: NetRole;
       lastHighlight?: MoveHighlight | null;
+      /** Draw offer / undo request still pending when this room was left. */
+      pendingOffer?: PendingOffer;
     }
   | { type: "move"; from: string; to: string; promo: string | null; state?: ActionState }
   | { type: "castle"; side: string; from?: string; state?: ActionState }
   | { type: "notation"; n: string; state?: ActionState }
-  | { type: "undo"; state?: ActionState }
+  | { type: "undo"; state?: ActionState } // accepted takeback
+  | { type: "undo_request"; state?: ActionState }
+  | { type: "undo_decline"; state?: ActionState }
   | { type: "resign"; state?: ActionState }
   | { type: "draw"; state?: ActionState }
   /** Client → DO only; not relayed. */
@@ -521,6 +535,19 @@ function parseHighlight(raw: unknown): MoveHighlight | null | undefined {
   return null;
 }
 
+/** undefined = field absent (older peer, don't touch caller default). */
+function parsePendingOffer(raw: unknown): PendingOffer | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const from = parseRole(r.from);
+  if ((r.kind === "draw" || r.kind === "undo") && from) {
+    return { kind: r.kind, from };
+  }
+  return null;
+}
+
 function parseMsg(msg: Record<string, unknown>): NetMsg | null {
   switch (msg.type) {
     case "hello": {
@@ -546,6 +573,7 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
       const role = parseRole(msg.role);
       const setup = msg.setup != null ? parseSetup(msg.setup) : null;
       const lastHighlight = parseHighlight(msg.lastHighlight);
+      const pendingOffer = parsePendingOffer(msg.pendingOffer);
       return {
         type: "sync",
         fen: msg.fen.trim(),
@@ -554,6 +582,7 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
         ...(setup ? { setup } : {}),
         ...(role ? { role } : {}),
         ...(lastHighlight !== undefined ? { lastHighlight } : {}),
+        ...(pendingOffer !== undefined ? { pendingOffer } : {}),
       };
     }
     case "move":
@@ -575,6 +604,8 @@ function parseMsg(msg: Record<string, unknown>): NetMsg | null {
       if (typeof msg.n !== "string") return null;
       return { type: "notation", n: msg.n };
     case "undo":
+    case "undo_request":
+    case "undo_decline":
     case "resign":
     case "draw":
       return { type: msg.type };

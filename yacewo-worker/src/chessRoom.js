@@ -30,6 +30,8 @@ function emptyRoom() {
     moveList: "",
     /** Exact from/to of the last move — persisted for reconnect highlight. */
     lastHighlight: null,
+    /** In-flight draw offer / undo request, for reconnect catch-up. */
+    pendingOffer: null,
     status: "waiting", // waiting | active | finished
     playerTokens: { host: null, guest: null },
     /** @type {{ host: object | null, guest: object | null }} */
@@ -80,7 +82,8 @@ function applyMessage(room, msg) {
       room.status = "active";
       return true;
     case "ready":
-    case "undo":
+    case "undo_request":
+    case "undo_decline":
       return true;
     case "sync":
       room.fen = msg.fen;
@@ -93,6 +96,7 @@ function applyMessage(room, msg) {
     case "move":
     case "castle":
     case "notation":
+    case "undo": // accepted takeback
     case "resign":
     case "draw":
       if (msg.state?.fen) room.fen = msg.state.fen;
@@ -112,7 +116,35 @@ function applyMessage(room, msg) {
 }
 
 function isMoveNotifyType(type) {
-  return type === "move" || type === "castle" || type === "notation";
+  return (
+    type === "move" ||
+    type === "castle" ||
+    type === "notation" ||
+    type === "resign" ||
+    type === "draw" ||
+    type === "undo_request"
+  );
+}
+
+/** Push copy per action type. `undo`/`undo_decline` are resolutions, not new
+ * asks — deliberately excluded, since the board state itself is self
+ * explanatory to a peer who reconnects and sees them. */
+function pushCopy(msg, mover) {
+  switch (msg.type) {
+    case "resign":
+      return { title: "Game over", body: `${mover} resigned` };
+    case "draw":
+      return msg.state?.isOver
+        ? { title: "Game over", body: "Draw agreed" }
+        : { title: "Draw offered", body: `${mover} offered a draw` };
+    case "undo_request":
+      return {
+        title: "Takeback requested",
+        body: `${mover} wants to take back their last move`,
+      };
+    default:
+      return { title: "Your move", body: `${mover} just moved` };
+  }
 }
 
 function isPushSubscription(raw) {
@@ -270,6 +302,7 @@ export class ChessRoom {
         ...(room.setup ? { setup: room.setup } : {}),
         role,
         lastHighlight: room.lastHighlight,
+        pendingOffer: room.pendingOffer ?? null,
       });
       return;
     }
@@ -304,7 +337,7 @@ export class ChessRoom {
     return `${origin}/?room=${encodeURIComponent(roomId)}`;
   }
 
-  async notifyOpponent(sessionRole) {
+  async notifyOpponent(sessionRole, msg) {
     const room = this.room;
     if (!room) return;
 
@@ -329,11 +362,12 @@ export class ChessRoom {
     const navigate = this.roomShareUrl(room.roomId);
     const origin = (this.env.SITE_ORIGIN || "").replace(/\/$/, "");
     const mover = sessionRole === "host" ? "White" : "Black";
+    const { title, body } = pushCopy(msg, mover);
     const payload = {
       web_push: 8030,
       notification: {
-        title: "Your move",
-        body: `${mover} just moved`,
+        title,
+        body,
         ...(navigate ? { navigate } : {}),
         ...(origin ? { icon: `${origin}/icon-192.png` } : {}),
         app_badge: 1,
@@ -426,13 +460,17 @@ export class ChessRoom {
     const room = await this.loadRoom();
 
     if (msg.type === "push-subscribe") {
-      if (!isPushSubscription(msg.subscription)) return;
+      if (!isPushSubscription(msg.subscription)) {
+        console.log("[push] rejected invalid subscription from", att.role, JSON.stringify(msg.subscription));
+        return;
+      }
       room.pushSubscriptions = room.pushSubscriptions ?? {
         host: null,
         guest: null,
       };
       room.pushSubscriptions[att.role] = msg.subscription;
       await this.saveRoom();
+      console.log("[push] stored subscription for", att.role, msg.subscription?.endpoint);
       return; // never relay
     }
 
@@ -445,11 +483,18 @@ export class ChessRoom {
 
     if (!applyMessage(room, msg)) return;
 
+    // Generic across every action type — the client computes the current
+    // truth (draw offer / undo request, or neither) and rides it on `state`;
+    // the DO just mirrors it so a reconnecting peer's sync can restore it.
+    if (msg.state && "pendingOffer" in msg.state) {
+      room.pendingOffer = msg.state.pendingOffer ?? null;
+    }
+
     await this.saveRoom();
     this.broadcast(msg, ws);
 
     if (isMoveNotifyType(msg.type)) {
-      await this.notifyOpponent(att.role);
+      await this.notifyOpponent(att.role, msg);
     }
   }
 
