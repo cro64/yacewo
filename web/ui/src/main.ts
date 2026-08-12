@@ -362,6 +362,7 @@ class App {
   private helpOpen = false;
   private rulesOpen = false;
   private pendingPromo: { from: string; to: string } | null = null;
+  private pendingConfirm: { kind: "undo" | "resign" | "draw" } | null = null;
   private notation = "";
   /** Landing hero board (non-interactive). */
   private previewBoard: Array<Piece | null> = [];
@@ -443,6 +444,7 @@ class App {
       if (e.key !== "Escape") return;
       if (
         !this.pendingPromo &&
+        !this.pendingConfirm &&
         !this.selected &&
         !this.helpOpen &&
         !this.rulesOpen
@@ -450,6 +452,7 @@ class App {
         return;
       e.preventDefault();
       this.pendingPromo = null;
+      this.pendingConfirm = null;
       this.clearSelection();
       this.helpOpen = false;
       this.rulesOpen = false;
@@ -719,6 +722,7 @@ class App {
       onPeerLeft: () => {
         this.clearSelection();
         this.pendingPromo = null;
+        this.pendingConfirm = null;
         if (this.screen === "play") {
           this.error = "Opponent left — waiting to rejoin";
         }
@@ -956,6 +960,28 @@ class App {
         });
         break;
     }
+  }
+
+  private runPendingConfirm() {
+    const kind = this.pendingConfirm?.kind;
+    this.pendingConfirm = null;
+    if (!kind) return;
+    if (kind === "undo") {
+      if (this.isRemote()) {
+        this.awaitingUndoResponse = true;
+        this.sendAction({ type: "undo_request" }, null);
+        play("offer");
+        this.render();
+        return;
+      }
+      this.tryLocalAction(this.api.undo(), { type: "undo" });
+      return;
+    }
+    if (kind === "resign") {
+      this.tryLocalAction(this.api.resign(), { type: "resign" });
+      return;
+    }
+    this.tryLocalAction(this.api.offerDraw(), { type: "draw" });
   }
 
   private tryLocalAction(result: EngineResult, msg: ActionMsg | null) {
@@ -1223,6 +1249,7 @@ class App {
     this.clearSelection();
     this.error = "";
     this.pendingPromo = null;
+    this.pendingConfirm = null;
     if (!this.isRemote()) {
       if (game.seed != null) {
         syncSeedInUrl(
@@ -1701,6 +1728,57 @@ class App {
     `;
   }
 
+  private renderConfirm() {
+    if (!this.pendingConfirm) return "";
+    const g = this.game;
+    const acceptDraw = g ? canAcceptDraw(g, this.myColor) : false;
+    const copy: Record<
+      "undo" | "resign" | "draw",
+      { title: string; body: string; confirmLabel: string }
+    > = {
+      undo: this.isRemote()
+        ? {
+            title: "Request a takeback?",
+            body: "Your opponent will need to accept before the move is undone.",
+            confirmLabel: "Send request",
+          }
+        : {
+            title: "Undo last move?",
+            body: "This will take back the last move.",
+            confirmLabel: "Undo",
+          },
+      draw: acceptDraw
+        ? {
+            title: "Accept draw?",
+            body: "This will end the game as a draw.",
+            confirmLabel: "Accept draw",
+          }
+        : {
+            title: "Offer a draw?",
+            body: "Your opponent will be asked to accept a draw.",
+            confirmLabel: "Offer draw",
+          },
+      resign: {
+        title: "Resign the game?",
+        body: "You will lose the game immediately.",
+        confirmLabel: "Resign",
+      },
+    };
+    const c = copy[this.pendingConfirm.kind];
+    return `
+      <div class="confirm" role="dialog" aria-label="${escapeAttr(c.title)}">
+        <div class="confirm-card">
+          <strong>${escapeHtml(c.title)}</strong>
+          <p>${escapeHtml(c.body)}</p>
+          <div class="confirm-row">
+            <button type="button" class="ghost-btn" data-action="confirm-no">Cancel</button>
+            <button type="button" class="action-btn confirm-danger" data-action="confirm-yes">${escapeHtml(c.confirmLabel)}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   /** Controls-only help (variant rules live under Rules). */
   private renderHelp(): string {
     const remote = this.isRemote();
@@ -1928,6 +2006,7 @@ class App {
         </aside>
       </main>
       ${this.renderPromo()}
+      ${this.renderConfirm()}
     `;
   }
 
@@ -1974,6 +2053,18 @@ class App {
       if (cancelPromo && this.root.contains(cancelPromo)) {
         this.pendingPromo = null;
         this.clearSelection();
+        this.render();
+        return;
+      }
+
+      const confirmYes = t.closest<HTMLElement>("[data-action='confirm-yes']");
+      if (confirmYes && this.root.contains(confirmYes)) {
+        this.runPendingConfirm();
+        return;
+      }
+      const confirmNo = t.closest<HTMLElement>("[data-action='confirm-no']");
+      if (confirmNo && this.root.contains(confirmNo)) {
+        this.pendingConfirm = null;
         this.render();
         return;
       }
@@ -2210,6 +2301,11 @@ class App {
     this.root.querySelector(".promo")?.remove();
     if (this.pendingPromo) {
       this.root.insertAdjacentHTML("beforeend", this.renderPromo());
+    }
+
+    this.root.querySelector(".confirm")?.remove();
+    if (this.pendingConfirm) {
+      this.root.insertAdjacentHTML("beforeend", this.renderConfirm());
     }
 
     armHapticTargets(this.root);
@@ -2599,22 +2695,20 @@ class App {
         ) {
           return;
         }
-        this.awaitingUndoResponse = true;
-        this.sendAction({ type: "undo_request" }, null);
-        play("offer");
-        this.render();
-        return;
       }
-      this.tryLocalAction(this.api.undo(), { type: "undo" });
+      this.pendingConfirm = { kind: "undo" };
+      this.render();
     });
     this.root.querySelector("[data-action='resign']")?.addEventListener("click", () => {
       if (this.isRemote() && !this.isMyTurn()) return;
-      this.tryLocalAction(this.api.resign(), { type: "resign" });
+      this.pendingConfirm = { kind: "resign" };
+      this.render();
     });
     this.root.querySelector("[data-action='draw']")?.addEventListener("click", () => {
       // Offer and accept both happen on your own turn (accept after opponent offered).
       if (this.isRemote() && !this.isMyTurn()) return;
-      this.tryLocalAction(this.api.offerDraw(), { type: "draw" });
+      this.pendingConfirm = { kind: "draw" };
+      this.render();
     });
     this.root.querySelector("[data-action='help']")?.addEventListener("click", () => {
       this.helpOpen = !this.helpOpen;

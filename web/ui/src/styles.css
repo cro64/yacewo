@@ -2035,6 +2035,63 @@ html[data-theme="dark"] .primary-btn {
   border: 1px solid transparent;
 }
 
+.confirm {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  display: grid;
+  place-items: center;
+  z-index: 30;
+  padding: 1rem;
+}
+
+.confirm-card {
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--frost-blur)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--frost-blur)) saturate(1.2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1.1rem;
+  display: grid;
+  gap: 0.6rem;
+  min-width: min(100%, 18rem);
+  max-width: 22rem;
+  box-shadow: 0 18px 40px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.confirm-card strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.confirm-card p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.confirm-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.confirm-row button {
+  flex: 1;
+}
+
+.confirm-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.confirm-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
 .loading,
 .boot-error {
   min-height: 100vh;
