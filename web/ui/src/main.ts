@@ -171,6 +171,13 @@ function replaceSearchParams(mutate: (params: URLSearchParams) => void) {
   }
 }
 
+/** Room the PWA was last connected to, so a fresh launch (no URL) can rejoin it. */
+const LAST_ROOM_KEY = "yacewo-last-room";
+
+function storedLastRoom(): string {
+  return normalizeRoom(localStorage.getItem(LAST_ROOM_KEY) ?? "");
+}
+
 function syncRoomInUrl(room: string | null) {
   replaceSearchParams((params) => {
     if (room) {
@@ -181,6 +188,11 @@ function syncRoomInUrl(room: string | null) {
       params.delete("room");
     }
   });
+  if (room) {
+    localStorage.setItem(LAST_ROOM_KEY, room);
+  } else {
+    localStorage.removeItem(LAST_ROOM_KEY);
+  }
 }
 
 type SeededMode = "anarchy" | "chess960";
@@ -1102,7 +1114,7 @@ class App {
       this.api = await loadEngine();
       this.bindKeys();
       this.refreshPreview(false);
-      const linkRoom = roomFromUrl();
+      const linkRoom = roomFromUrl() || storedLastRoom();
       if (linkRoom.length >= 4) {
         await this.joinRemoteRoom(linkRoom);
         return;
