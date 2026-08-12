@@ -1186,10 +1186,21 @@ html[data-theme="dark"] .primary-btn {
   font-weight: 500;
   letter-spacing: 0.02em;
   transition: border-color 140ms var(--ease), background 140ms var(--ease);
+  -webkit-tap-highlight-color: transparent;
 }
 
-.ghost-btn:hover,
-.action-btn:hover {
+@media (hover: hover) and (pointer: fine) {
+  .ghost-btn:hover,
+  .action-btn:hover {
+    border-color: var(--moss);
+    background: color-mix(in srgb, var(--moss) 10%, transparent);
+  }
+}
+
+/* Touch/press feedback — mirrors :hover but tied to the press itself so it
+   clears on release instead of lingering the way :hover does after a tap. */
+.ghost-btn:active,
+.action-btn:active {
   border-color: var(--moss);
   background: color-mix(in srgb, var(--moss) 10%, transparent);
 }
@@ -1917,35 +1928,72 @@ html[data-theme="dark"] .primary-btn {
     color 140ms var(--ease);
 }
 
-.panel-actions .action-btn:hover:not(:disabled) {
-  /* per-action colors below */
+@media (hover: hover) and (pointer: fine) {
+  .panel-actions .action-btn:hover:not(:disabled) {
+    /* per-action colors below */
+    border-color: var(--moss);
+    background: color-mix(in srgb, var(--moss) 14%, transparent);
+    color: var(--moss-deep);
+  }
+
+  .panel-actions .action-btn[data-action="undo"]:hover:not(:disabled) {
+    color: var(--accent-undo);
+    border-color: color-mix(in srgb, var(--accent-undo) 55%, var(--line));
+    background: color-mix(in srgb, var(--accent-undo) 14%, transparent);
+  }
+
+  .panel-actions .action-btn[data-action="draw"]:hover:not(:disabled),
+  .panel-actions .action-btn.draw-accept:hover:not(:disabled) {
+    color: var(--accent-draw);
+    border-color: color-mix(in srgb, var(--accent-draw) 55%, var(--line));
+    background: color-mix(in srgb, var(--accent-draw) 16%, transparent);
+  }
+
+  .panel-actions .action-btn[data-action="resign"]:hover:not(:disabled),
+  .panel-actions .action-btn[data-action="new"]:hover:not(:disabled) {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+
+  .panel-actions .action-btn[data-action="help"]:hover:not(:disabled),
+  .panel-actions .action-btn[data-action="rules"]:hover:not(:disabled) {
+    color: var(--moss-deep);
+    border-color: color-mix(in srgb, var(--moss) 60%, var(--line));
+    background: color-mix(in srgb, var(--moss) 16%, transparent);
+  }
+}
+
+/* Touch/press feedback — mirrors the hover colors above but keyed off
+   :active, so it's live only while the finger/button is actually down. */
+.panel-actions .action-btn:active:not(:disabled) {
   border-color: var(--moss);
   background: color-mix(in srgb, var(--moss) 14%, transparent);
   color: var(--moss-deep);
 }
 
-.panel-actions .action-btn[data-action="undo"]:hover:not(:disabled) {
+.panel-actions .action-btn[data-action="undo"]:active:not(:disabled) {
   color: var(--accent-undo);
   border-color: color-mix(in srgb, var(--accent-undo) 55%, var(--line));
   background: color-mix(in srgb, var(--accent-undo) 14%, transparent);
 }
 
-.panel-actions .action-btn[data-action="draw"]:hover:not(:disabled),
-.panel-actions .action-btn.draw-accept:hover:not(:disabled) {
+.panel-actions .action-btn[data-action="draw"]:active:not(:disabled),
+.panel-actions .action-btn.draw-accept:active:not(:disabled) {
   color: var(--accent-draw);
   border-color: color-mix(in srgb, var(--accent-draw) 55%, var(--line));
   background: color-mix(in srgb, var(--accent-draw) 16%, transparent);
 }
 
-.panel-actions .action-btn[data-action="resign"]:hover:not(:disabled),
-.panel-actions .action-btn[data-action="new"]:hover:not(:disabled) {
+.panel-actions .action-btn[data-action="resign"]:active:not(:disabled),
+.panel-actions .action-btn[data-action="new"]:active:not(:disabled) {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
-.panel-actions .action-btn[data-action="help"]:hover:not(:disabled),
-.panel-actions .action-btn[data-action="rules"]:hover:not(:disabled) {
+.panel-actions .action-btn[data-action="help"]:active:not(:disabled),
+.panel-actions .action-btn[data-action="rules"]:active:not(:disabled) {
   color: var(--moss-deep);
   border-color: color-mix(in srgb, var(--moss) 60%, var(--line));
   background: color-mix(in srgb, var(--moss) 16%, transparent);
@@ -2088,7 +2136,13 @@ html[data-theme="dark"] .primary-btn {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
-.confirm-danger:hover:not(:disabled) {
+@media (hover: hover) and (pointer: fine) {
+  .confirm-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 22%, transparent);
+  }
+}
+
+.confirm-danger:active:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 22%, transparent);
 }
 

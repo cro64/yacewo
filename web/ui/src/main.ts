@@ -2777,6 +2777,11 @@ function preferPortrait() {
   void ori?.lock?.("portrait").catch(() => undefined);
 }
 
+// iOS Safari only applies :active styles when some element in the document
+// has a touch listener — otherwise taps skip straight to :hover/click with
+// no pressed state at all. A no-op listener is the standard workaround.
+document.addEventListener("touchstart", () => {}, { passive: true });
+
 const appEl = document.querySelector<HTMLElement>("#app");
 if (appEl) {
   preferPortrait();
