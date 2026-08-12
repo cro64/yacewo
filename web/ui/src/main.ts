@@ -720,9 +720,9 @@ class App {
         this.render();
       },
       onPeerLeft: () => {
-        this.clearSelection();
-        this.pendingPromo = null;
-        this.pendingConfirm = null;
+        // The board hasn't changed — just the opponent's connection. Leave
+        // any in-progress selection/dialog alone; isMyTurn() already blocks
+        // moves until they rejoin, so there's nothing unsafe about it.
         if (this.screen === "play") {
           this.error = "Opponent left — waiting to rejoin";
         }
@@ -845,11 +845,16 @@ class App {
         game = { ...withOffer.game, seed: game.seed, moveList: game.moveList };
       }
     }
-    this.awaitingUndoResponse = false;
-    this.incomingUndoRequest = false;
-    if (msg.pendingOffer?.kind === "undo") {
-      if (msg.pendingOffer.from === this.myRole()) this.awaitingUndoResponse = true;
-      else this.incomingUndoRequest = true;
+    // `pendingOffer` absent (vs. explicit null) means an older peer didn't
+    // send it at all — leave our current undo-wait state alone rather than
+    // silently dropping "waiting for a response" on a catch-up sync.
+    if (msg.pendingOffer !== undefined) {
+      this.awaitingUndoResponse = false;
+      this.incomingUndoRequest = false;
+      if (msg.pendingOffer?.kind === "undo") {
+        if (msg.pendingOffer.from === this.myRole()) this.awaitingUndoResponse = true;
+        else this.incomingUndoRequest = true;
+      }
     }
 
     if (setup) {
@@ -864,7 +869,12 @@ class App {
     }
 
     this.reconnecting = false;
-    this.lastMoves = msg.lastHighlight ? [msg.lastHighlight] : [];
+    // Same deal as pendingOffer above: undefined means the field was never
+    // sent, not "there is no last move" — don't blank out an existing
+    // last-move highlight over a payload that simply omits it.
+    if (msg.lastHighlight !== undefined) {
+      this.lastMoves = msg.lastHighlight ? [msg.lastHighlight] : [];
+    }
     this.setGame(game);
     this.screen = "play";
     this.error = "";
@@ -1245,11 +1255,18 @@ class App {
   }
 
   private setGame(game: GameSnapshot) {
+    const prev = this.game;
     this.game = game;
-    this.clearSelection();
+    // A snapshot can arrive without the position actually changing (a
+    // reconnect resync, a draw offer flag flip, an opponent's connection
+    // blip) — only drop the player's in-progress selection/dialogs when the
+    // board itself moved on, not on every incoming snapshot.
+    if (!prev || prev.fen !== game.fen || game.isOver) {
+      this.clearSelection();
+      this.pendingPromo = null;
+      this.pendingConfirm = null;
+    }
     this.error = "";
-    this.pendingPromo = null;
-    this.pendingConfirm = null;
     if (!this.isRemote()) {
       if (game.seed != null) {
         syncSeedInUrl(
