@@ -254,7 +254,8 @@ a:focus-visible {
 }
 
 #app {
-  min-height: 100vh;
+  /* --install-banner-h is the in-flow install banner's height, 0 without it. */
+  min-height: calc(100vh - var(--install-banner-h, 0px));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -317,6 +318,114 @@ a:focus-visible {
   border-bottom-color: var(--moss);
 }
 
+/* —— install banner (once ever, on a first visit; landing only) —— */
+
+/* In flow above #app, so it pushes the page down instead of covering the
+   topbar. The shell gives back exactly its height (set from JS). */
+.install-banner {
+  position: relative;
+  z-index: 40;
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--frost-blur)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--frost-blur)) saturate(1.15);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.12);
+}
+
+.install-banner-inner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem clamp(0.75rem, 3vw, 1.75rem);
+  padding:
+    max(0.75rem, env(safe-area-inset-top, 0px))
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-right, 0px))
+    0.75rem
+    max(clamp(1rem, 3vw, 1.75rem), env(safe-area-inset-left, 0px));
+  opacity: 0;
+  transform: translateY(-0.4rem);
+  transition: transform 300ms var(--ease), opacity 240ms var(--ease);
+}
+
+.install-banner.is-open .install-banner-inner {
+  opacity: 1;
+  transform: none;
+}
+
+/* The banner already carries the top inset — don't pay for it twice. */
+body:has(> .install-banner) .topbar {
+  padding-top: 0.65rem;
+}
+
+/* The shell is short by the banner's height while it's up — let the landing
+   scroll rather than clip the footer off the bottom. */
+body:has(> .install-banner) #app:has(> .landing) {
+  overflow-y: auto;
+}
+
+.install-banner-text {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  /* Keeps the actions on the same row until the copy really can't fit. */
+  flex: 1 1 13rem;
+}
+
+.install-banner-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, 3.2vw, 1.35rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--moss-deep);
+}
+
+.install-banner-copy {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--ink-muted);
+}
+
+.install-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.install-share svg {
+  display: block;
+}
+
+.install-banner-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.install-btn {
+  padding: 0.6rem 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .install-banner-inner {
+    padding-bottom: 0.6rem;
+  }
+
+  .install-banner-actions {
+    gap: 0.75rem;
+  }
+
+  .install-btn {
+    padding: 0.5rem 1rem;
+  }
+}
+
 .theme-btn[aria-pressed="true"] {
   color: var(--moss-deep);
 }
@@ -377,7 +486,7 @@ a:focus-visible {
 
 /* Viewport-locked shell; landing itself scrolls when chrome + board don't fit. */
 #app:has(> .landing) {
-  height: 100dvh;
+  height: calc(100dvh - var(--install-banner-h, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -565,7 +674,10 @@ a:focus-visible {
   --board-size: min(
     var(--landing-board-max),
     calc(100cqi - 1rem),
-    calc(100dvh - var(--landing-chrome) - var(--board-mode-gap)),
+    calc(
+      100dvh - var(--install-banner-h, 0px) - var(--landing-chrome) -
+        var(--board-mode-gap)
+    ),
     var(--landing-board-span)
   );
   margin-bottom: var(--board-mode-gap);

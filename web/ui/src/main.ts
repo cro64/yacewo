@@ -39,6 +39,7 @@ import {
 import { armHapticTargets } from "./haptics";
 import { subscribeToPush } from "./push";
 import { isIOSSafariNotInstalled } from "./iosPrompt";
+import { armInstallBanner, syncInstallBanner } from "./installBanner";
 
 type Screen = "landing" | "lobby" | "play";
 type ActionMsg = Exclude<
@@ -2028,6 +2029,9 @@ class App {
   }
 
   render() {
+    // Install prompt only belongs on the landing — never over a live board.
+    syncInstallBanner(this.screen === "landing");
+
     // Play updates are frequent (selection, moves, net). Patch in place so we
     // don't wipe the notation input or rebind the whole tree every ply.
     if (
@@ -2803,6 +2807,7 @@ const appEl = document.querySelector<HTMLElement>("#app");
 if (appEl) {
   preferPortrait();
   window.addEventListener("orientationchange", preferPortrait);
+  armInstallBanner();
   const app = new App(appEl);
   void app.boot();
 }
