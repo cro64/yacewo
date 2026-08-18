@@ -8,6 +8,29 @@
     <meta name="apple-mobile-web-app-title" content="YACEWO" />
     <meta name="theme-color" content="#3f6a48" />
     <title>YACEWO — Chess in OCaml</title>
+    <meta
+      name="description"
+      content="Free two-player chess in your browser. Classical, Anarchy, Chess960 and Horde — hotseat on one phone or share a room link. No account, no install."
+    />
+    <link rel="canonical" href="https://cro64.github.io/yacewo/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="YACEWO" />
+    <meta property="og:url" content="https://cro64.github.io/yacewo/" />
+    <meta property="og:title" content="YACEWO — Chess in OCaml" />
+    <meta
+      property="og:description"
+      content="Free two-player chess in your browser. Classical, Anarchy, Chess960 and Horde — hotseat on one phone or share a room link. No account, no install."
+    />
+    <meta property="og:image" content="https://cro64.github.io/yacewo/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The YACEWO landing board in light theme, with the variant picker and Play button"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -17,6 +40,28 @@
       href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,500;0,600;0,700;1,500&family=Outfit:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "YACEWO",
+        "alternateName": "Yet Another Chess Enigma, Written in OCaml",
+        "url": "https://cro64.github.io/yacewo/",
+        "applicationCategory": "GameApplication",
+        "browserRequirements": "Requires JavaScript",
+        "operatingSystem": "Any",
+        "description": "Free two-player chess in your browser. Classical, Anarchy, Chess960 and Horde — hotseat on one phone or share a room link. No account, no install.",
+        "screenshot": "https://cro64.github.io/yacewo/og.png",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://opensource.org/license/mit",
+        "sameAs": ["https://github.com/cro64/yacewo"]
+      }
+    </script>
   </head>
   <body>
     <div class="rotate-gate" role="alert" aria-live="polite">
@@ -26,7 +71,30 @@
       <p class="rotate-gate-title">Rotate your device</p>
       <p class="rotate-gate-copy">YACEWO plays best in portrait.</p>
     </div>
-    <div id="app"></div>
+    <!--
+      Static fallback: describes the page for crawlers and no-JS visitors.
+      App.boot() replaces #app wholesale, so this is never seen with JS on.
+    -->
+    <div id="app">
+      <div class="no-js-intro">
+        <h1>YACEWO — Yet Another Chess Enigma, Written in OCaml</h1>
+        <p>
+          Two-player chess in your browser. Play hotseat on a single phone, or
+          share a room link and play someone remotely. No account, no install.
+        </p>
+        <p>
+          Four variants: <strong>Classical</strong>, <strong>Anarchy</strong>,
+          <strong>Chess960</strong> and <strong>Horde</strong>. Paste a FEN to
+          pick up any position, click pieces or type moves like
+          <code>e4</code>, <code>Nf3</code>, <code>O-O</code>, and switch
+          between light and dark themes.
+        </p>
+        <p>
+          The board needs JavaScript. Source and a terminal version live on
+          <a href="https://github.com/cro64/yacewo">GitHub</a>.
+        </p>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
